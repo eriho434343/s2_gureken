@@ -195,7 +195,7 @@
     </header>
     <div class="content edit-form">
       <label class="field">
-        <span class="field-label">カテゴリ</span>
+        <span class="field-label">カテゴリ <span class="req">必須</span></span>
         <div class="seg">
           <button class="seg-opt" data-edcat="common">共通</button>
           <button class="seg-opt" data-edcat="solution">ソリューション</button>
@@ -203,24 +203,24 @@
         </div>
       </label>
       <label class="field">
-        <span class="field-label">問題 (穴埋めは【】または【①】【②】で囲む)</span>
+        <span class="field-label">問題 <span class="req">必須</span> (穴埋めは【】または【①】【②】で囲む)</span>
         <textarea id="ed-q" rows="4" placeholder="例: ROIC【①】%以上、ROE【②】%以上" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
       </label>
       <label class="field">
-        <span class="field-label">解答</span>
+        <span class="field-label">解答 <span class="req">必須</span></span>
         <textarea id="ed-a" rows="6" placeholder="例: ① 3.3　② 8.0" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
       </label>
       <label class="field">
-        <span class="field-label">タグ (カンマ区切り)</span>
+        <span class="field-label">タグ <span class="opt">任意</span> (カンマ区切り)</span>
         <input id="ed-tags" type="text" placeholder="経営計画2026, 財務目標" autocomplete="off">
       </label>
       <label class="field">
-        <span class="field-label">出典</span>
+        <span class="field-label">出典 <span class="opt">任意</span></span>
         <input id="ed-source" type="text" placeholder="関西電力グループ経営計画2026 p.2" autocomplete="off">
       </label>
       <div class="row-pair">
         <label class="field">
-          <span class="field-label">対象年度</span>
+          <span class="field-label">対象年度 <span class="opt">任意</span></span>
           <select id="ed-year">
             <option value="">指定なし</option>
             <option value="2026">2026</option>
@@ -232,7 +232,7 @@
           </select>
         </label>
         <label class="field">
-          <span class="field-label">重要度</span>
+          <span class="field-label">重要度 <span class="opt">任意</span></span>
           <div class="stars" id="ed-stars">
             <button class="star" data-imp="1">★</button>
             <button class="star" data-imp="2">★</button>
@@ -242,6 +242,10 @@
           </div>
         </label>
       </div>
+      <label class="field">
+        <span class="field-label">作成者 <span class="opt">任意</span> (共有時に誰が作ったか分かる)</span>
+        <input id="ed-author" type="text" placeholder="例: 田中" autocomplete="off">
+      </label>
       <button class="btn-primary" id="btn-edit-save">保存</button>
     </div>
   </section>
@@ -344,14 +348,37 @@
       </div>
 
       <div class="settings-section">
-        <h3>データ管理(PC↔iPhone同期)</h3>
-        <p class="hint">問題と進捗をJSONで書き出し/読み込み。PCで作成→iPhoneで取り込みなどに使えます。</p>
-        <button class="btn-tertiary" id="btn-export">📤 全データをエクスポート(JSON)</button>
-        <button class="btn-tertiary" id="btn-import">📥 JSONから読み込み(問題のみマージ)</button>
-        <button class="btn-tertiary" id="btn-import-full">📥 JSONから完全復元(進捗ごと上書き)</button>
-        <input type="file" id="file-import" accept="application/json,.json" hidden>
+        <h3>あなた</h3>
+        <label class="field">
+          <span class="field-label">名前 (新規問題の作成者として記録) <span class="opt">任意</span></span>
+          <input type="text" id="set-author-name" placeholder="例: 田中" autocomplete="off">
+        </label>
+      </div>
+
+      <div class="settings-section">
+        <h3>自分用バックアップ</h3>
+        <p class="hint">問題＋進捗＋設定を1ファイルに。複数端末で自分のデータを移すときや、定期バックアップに。</p>
+        <button class="btn-tertiary" id="btn-export-all">📤 全データをエクスポート(JSON)</button>
+        <button class="btn-tertiary" id="btn-import-full">📥 完全復元(進捗ごと上書き)</button>
+      </div>
+
+      <div class="settings-section">
+        <h3>他の人と問題を共有</h3>
+        <p class="hint">問題だけをファイルにして渡す/もらう。学習履歴は端末ごとなので、もらった問題も自分のペースで進められます。</p>
+        <button class="btn-tertiary" id="btn-export-questions">📤 問題のみエクスポート(JSON)</button>
+        <button class="btn-tertiary" id="btn-import-questions">📥 問題のみインポート(マージ)</button>
+      </div>
+
+      <div class="settings-section">
+        <h3>Excel・Wordから取り込み</h3>
+        <p class="hint">過去問のExcel/Wordをタブ区切り(またはCSV)で書き出して取込。フォーマットはREADME参照。</p>
         <button class="btn-tertiary" id="btn-import-csv">📥 CSV/TSVから問題インポート</button>
+        <input type="file" id="file-import" accept="application/json,.json" hidden>
         <input type="file" id="file-import-csv" accept=".csv,.tsv,text/csv,text/tab-separated-values" hidden>
+      </div>
+
+      <div class="settings-section">
+        <h3>シード問題</h3>
         <button class="btn-tertiary" id="btn-load-seed">📦 シード問題を再読込(マージ)</button>
       </div>
 
@@ -370,7 +397,7 @@
       <div class="settings-section about">
         <h3>このアプリ</h3>
         <p>SM-2間隔反復・アクティブリコール・インターリービング・穴埋め式を採用。完全オフライン動作・無料。</p>
-        <p class="hint">v1.1 / Build 2026.05 (修正: モーダル表示, 穴埋め式)</p>
+        <p class="hint">v1.2 / Build 2026.05 (修正: モーダル, 穴埋め, 複数人共有)</p>
       </div>
     </div>
   </section>

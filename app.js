@@ -31,6 +31,7 @@ const state = {
     theme: 'auto',
     fontSize: 'm',
     ttsAuto: false,
+    authorName: '',
   },
   todayKey: '',
   todaySeen: { new: 0, rev: 0 },  // counters reset daily
@@ -592,6 +593,7 @@ function renderStudy() {
   }
   if (q.source) meta.push(`<span>${escapeHtml(q.source)}</span>`);
   if (q.year) meta.push(`<span>(${q.year}年度)</span>`);
+  if (q.author) meta.push(`<span class="meta-author">作:${escapeHtml(q.author)}</span>`);
   document.getElementById('study-meta').innerHTML = meta.join(' ');
 
   document.getElementById('study-question').innerHTML = renderBlanks(q.question);
@@ -763,11 +765,13 @@ function renderList() {
     const statusLabel = {new:'未学習', learning:'学習中', review:'復習中', mastered:'習得', leech:'苦手'}[status];
     const stars = '★'.repeat(q.importance || 0);
     const due = p && p.due ? fmtDue(new Date(p.due)) : '未学習';
+    const author = q.author ? `<span class="q-author">作:${escapeHtml(q.author)}</span>` : '';
     return `<li class="q-item" data-qid="${escapeHtml(q.id)}">
       <div class="q-item-head">
         <span class="q-cat-badge">${CATS[q.category] || q.category}</span>
         <span class="q-status q-status-${status}">${statusLabel}</span>
         <span class="q-importance">${stars}</span>
+        ${author}
         <span style="margin-left:auto" class="q-due">${escapeHtml(due)}</span>
       </div>
       <div class="q-text">${escapeHtml(q.question)}</div>
@@ -799,6 +803,8 @@ function openEditor(qid) {
   document.getElementById('ed-tags').value = q ? (q.tags || []).join(', ') : '';
   document.getElementById('ed-source').value = q ? (q.source || '') : '';
   document.getElementById('ed-year').value = q && q.year ? String(q.year) : '';
+  // For new questions, prefill author from settings; for existing, use stored
+  document.getElementById('ed-author').value = q ? (q.author || '') : (state.settings.authorName || '');
   showView('view-edit');
 }
 
@@ -814,6 +820,7 @@ async function saveEditor() {
   const source = document.getElementById('ed-source').value.trim();
   const yearV = document.getElementById('ed-year').value;
   const year = yearV ? Number(yearV) : null;
+  const author = document.getElementById('ed-author').value.trim();
 
   let rec;
   if (state.editingId) {
@@ -825,6 +832,7 @@ async function saveEditor() {
     rec.source = source;
     rec.year = year;
     rec.importance = state.editingImp;
+    rec.author = author || rec.author || '';
     rec.modifiedAt = new Date().toISOString();
   } else {
     rec = {
@@ -834,6 +842,7 @@ async function saveEditor() {
       answer: aText,
       tags, source, year,
       importance: state.editingImp,
+      author: author || state.settings.authorName || '',
       createdAt: new Date().toISOString(),
       modifiedAt: new Date().toISOString(),
     };
@@ -968,6 +977,7 @@ function renderSettings() {
   document.getElementById('set-theme').value = state.settings.theme;
   document.getElementById('set-font-size').value = state.settings.fontSize;
   document.getElementById('set-tts-auto').checked = !!state.settings.ttsAuto;
+  document.getElementById('set-author-name').value = state.settings.authorName || '';
 }
 
 async function saveSettingsFromForm() {
@@ -978,6 +988,7 @@ async function saveSettingsFromForm() {
   state.settings.theme = document.getElementById('set-theme').value;
   state.settings.fontSize = document.getElementById('set-font-size').value;
   state.settings.ttsAuto = document.getElementById('set-tts-auto').checked;
+  state.settings.authorName = document.getElementById('set-author-name').value.trim();
   await saveSettings();
   applyTheme();
   applyFontSize();
@@ -988,39 +999,77 @@ async function saveSettingsFromForm() {
 // ============================================
 async function exportAll() {
   const data = {
-    version: 1,
+    version: 2,
+    type: 'full',
     exportedAt: new Date().toISOString(),
     settings: state.settings,
     questions: state.questions,
     progress: state.progress,
   };
+  downloadJSON(data, `shoshin-shiken-full-${dateKey()}.json`);
+  toast('全データをエクスポートしました');
+}
+
+async function exportQuestionsOnly() {
+  const data = {
+    version: 2,
+    type: 'questions-only',
+    exportedAt: new Date().toISOString(),
+    note: '問題のみのエクスポート(進捗・設定は含まれません)。共有用。',
+    questions: state.questions,
+  };
+  downloadJSON(data, `shoshin-shiken-questions-${dateKey()}.json`);
+  toast(`${state.questions.length}問をエクスポートしました`);
+}
+
+function downloadJSON(data, filename) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url;
-  const ts = new Date().toISOString().slice(0,10);
-  a.download = `shoshin-shiken-${ts}.json`;
+  a.href = url; a.download = filename;
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
-  toast('エクスポート完了');
 }
 
 async function importJSON(file, full) {
   try {
     const text = await file.text();
     const data = JSON.parse(text);
-    if (!data || !Array.isArray(data.questions)) throw new Error('不正なファイル');
-    let added = 0, updated = 0;
+    if (!data || !Array.isArray(data.questions)) throw new Error('不正なファイル(questions配列なし)');
+
+    // Type-aware safety check for full restore
+    if (full && data.type === 'questions-only') {
+      const ok = await confirm('このファイルは「問題のみ」です。完全復元すると、現在の進捗が消えてしまいます。\n本当に進めますか?');
+      if (!ok) return;
+    }
+
+    let added = 0, updated = 0, skipped = 0;
     for (const q of data.questions) {
       if (!q.id) q.id = uid();
       if (!q.category) q.category = 'common';
       if (!q.createdAt) q.createdAt = new Date().toISOString();
-      q.modifiedAt = new Date().toISOString();
-      const existing = state.questions.findIndex(x => x.id === q.id);
-      if (existing >= 0) { state.questions[existing] = q; updated++; }
-      else { state.questions.push(q); added++; }
-      await dbPut(STORE_Q, q);
+      if (!q.modifiedAt) q.modifiedAt = q.createdAt;
+
+      const existing = state.questions.find(x => x.id === q.id);
+      if (existing) {
+        // Merge: keep newer (modifiedAt-based); skip if local is newer/equal
+        const localTime = new Date(existing.modifiedAt || existing.createdAt || 0).getTime();
+        const importTime = new Date(q.modifiedAt || q.createdAt || 0).getTime();
+        if (importTime > localTime || full) {
+          const idx = state.questions.indexOf(existing);
+          state.questions[idx] = q;
+          await dbPut(STORE_Q, q);
+          updated++;
+        } else {
+          skipped++;
+        }
+      } else {
+        state.questions.push(q);
+        await dbPut(STORE_Q, q);
+        added++;
+      }
     }
+
     if (full && data.progress) {
       // Replace progress
       await dbClear(STORE_P);
@@ -1036,7 +1085,7 @@ async function importJSON(file, full) {
       await saveSettings();
       applyTheme(); applyFontSize();
     }
-    toast(`インポート完了: 追加${added}件 / 更新${updated}件`);
+    toast(`完了: 新規${added} / 更新${updated} / スキップ${skipped}`);
     renderHome(); renderList(); renderStats();
   } catch (e) {
     console.error(e);
@@ -1045,8 +1094,9 @@ async function importJSON(file, full) {
 }
 
 async function importCSV(file) {
-  // CSV format: category,question,answer,tags,source,year,importance
-  // Headers row required. Tab-separated also accepted.
+  // CSV format (header row required, tab or comma):
+  //   必須: category, question, answer
+  //   任意: tags, source, year, importance, author
   try {
     const text = await file.text();
     const sep = text.indexOf('\t') >= 0 && text.indexOf('\t') < text.indexOf('\n') ? '\t' : ',';
@@ -1055,7 +1105,8 @@ async function importCSV(file) {
     const headers = rows[0].map(h => h.trim().toLowerCase());
     const idx = (name) => headers.indexOf(name);
     const iCat = idx('category'); const iQ = idx('question'); const iA = idx('answer');
-    const iTags = idx('tags'); const iSrc = idx('source'); const iYear = idx('year'); const iImp = idx('importance');
+    const iTags = idx('tags'); const iSrc = idx('source'); const iYear = idx('year');
+    const iImp = idx('importance'); const iAuth = idx('author');
     if (iQ < 0 || iA < 0) throw new Error('question / answer 列が必須です');
     let n = 0;
     for (let i = 1; i < rows.length; i++) {
@@ -1069,10 +1120,11 @@ async function importCSV(file) {
         category: catNorm,
         question: r[iQ].trim(),
         answer: r[iA].trim(),
-        tags: iTags >= 0 ? r[iTags].split(/[,、|]/).map(s => s.trim()).filter(Boolean) : [],
-        source: iSrc >= 0 ? r[iSrc].trim() : '',
+        tags: iTags >= 0 ? (r[iTags] || '').split(/[,、|;]/).map(s => s.trim()).filter(Boolean) : [],
+        source: iSrc >= 0 ? (r[iSrc] || '').trim() : '',
         year: iYear >= 0 && r[iYear] ? Number(r[iYear].trim()) : null,
         importance: iImp >= 0 && r[iImp] ? Math.max(1, Math.min(5, Number(r[iImp]))) : 3,
+        author: iAuth >= 0 ? (r[iAuth] || '').trim() : (state.settings.authorName || ''),
         createdAt: new Date().toISOString(),
         modifiedAt: new Date().toISOString(),
       };
@@ -1184,7 +1236,7 @@ function bindEvents() {
 
   // Settings: live save fields
   ['set-exam-date','set-new-per-day','set-rev-per-day','set-mix-ratio',
-   'set-theme','set-font-size','set-tts-auto'].forEach(id => {
+   'set-theme','set-font-size','set-tts-auto','set-author-name'].forEach(id => {
     document.getElementById(id).addEventListener('change', saveSettingsFromForm);
   });
 
@@ -1252,8 +1304,9 @@ function bindEvents() {
   });
 
   // Settings: import/export
-  document.getElementById('btn-export').addEventListener('click', exportAll);
-  document.getElementById('btn-import').addEventListener('click', () => {
+  document.getElementById('btn-export-all').addEventListener('click', exportAll);
+  document.getElementById('btn-export-questions').addEventListener('click', exportQuestionsOnly);
+  document.getElementById('btn-import-questions').addEventListener('click', () => {
     document.getElementById('file-import').dataset.full = '0';
     document.getElementById('file-import').click();
   });
