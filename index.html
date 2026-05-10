@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#1a2238" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1419" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="昇進試験">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>昇進試験 学習</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Loading screen -->
+<div id="loader" class="loader"><div class="loader-spinner"></div></div>
+
+<!-- Main app -->
+<main id="app" hidden>
+
+  <!-- ===== HOME ===== -->
+  <section id="view-home" class="view active">
+    <header class="topbar">
+      <div class="brand">昇進試験</div>
+      <button class="icon-btn" id="btn-settings" aria-label="設定">⚙︎</button>
+    </header>
+
+    <div class="content">
+      <div class="status-card">
+        <div class="status-row">
+          <div class="status-num" id="num-due">—</div>
+          <div class="status-label">本日の復習</div>
+        </div>
+        <div class="status-divider"></div>
+        <div class="status-row">
+          <div class="status-num" id="num-new">—</div>
+          <div class="status-label">未学習</div>
+        </div>
+        <div class="status-divider"></div>
+        <div class="status-row">
+          <div class="status-num" id="num-streak">—</div>
+          <div class="status-label">連続日</div>
+        </div>
+      </div>
+
+      <div class="exam-countdown" id="exam-countdown">試験まで — 日</div>
+
+      <div class="category-chips" role="tablist" aria-label="カテゴリ">
+        <button class="chip active" data-cat="all">全て</button>
+        <button class="chip" data-cat="common">共通</button>
+        <button class="chip" data-cat="solution">ソリューション</button>
+        <button class="chip" data-cat="engineering">エンジニアリング</button>
+      </div>
+
+      <div class="cat-stats" id="cat-stats"></div>
+
+      <div class="action-stack">
+        <button class="btn-primary" id="btn-review">
+          <span class="btn-title">復習を開始</span>
+          <span class="btn-sub" id="btn-review-sub">期日が来た問題から</span>
+        </button>
+        <button class="btn-secondary" id="btn-new">
+          <span class="btn-title">新規を学ぶ</span>
+          <span class="btn-sub" id="btn-new-sub">まだ見たことのない問題</span>
+        </button>
+        <button class="btn-tertiary" id="btn-mixed">
+          <span class="btn-title">混合学習(インターリーブ)</span>
+          <span class="btn-sub">復習+新規をシャッフル出題</span>
+        </button>
+        <button class="btn-tertiary" id="btn-wrong">
+          <span class="btn-title">間違えた問題</span>
+          <span class="btn-sub" id="btn-wrong-sub">直近で × にした問題</span>
+        </button>
+      </div>
+
+      <div class="session-options">
+        <span class="opt-label">セッション長:</span>
+        <button class="opt active" data-size="10">10問</button>
+        <button class="opt" data-size="20">20問</button>
+        <button class="opt" data-size="0">無制限</button>
+      </div>
+    </div>
+
+    <nav class="tabbar">
+      <button class="tab active" data-view="view-home"><span>🏠</span>ホーム</button>
+      <button class="tab" data-view="view-list"><span>📋</span>問題</button>
+      <button class="tab" data-view="view-stats"><span>📊</span>統計</button>
+    </nav>
+  </section>
+
+  <!-- ===== STUDY ===== -->
+  <section id="view-study" class="view">
+    <header class="topbar">
+      <button class="icon-btn" id="btn-study-back" aria-label="戻る">×</button>
+      <div class="study-progress">
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        <div class="progress-text" id="progress-text">1 / 10</div>
+      </div>
+      <button class="icon-btn" id="btn-tts" aria-label="読み上げ">🔊</button>
+    </header>
+
+    <div class="study-content">
+      <div class="study-meta" id="study-meta"></div>
+      <div class="study-question" id="study-question"></div>
+      <div class="study-answer" id="study-answer" hidden></div>
+    </div>
+
+    <div class="study-actions">
+      <button class="btn-show-answer" id="btn-show-answer">答えを見る</button>
+      <div class="rating-grid" id="rating-grid" hidden>
+        <button class="rate rate-again" data-rating="1">
+          <span class="rate-label">もう一度</span>
+          <span class="rate-interval" id="int-1">1日</span>
+        </button>
+        <button class="rate rate-hard" data-rating="2">
+          <span class="rate-label">難しい</span>
+          <span class="rate-interval" id="int-2">3日</span>
+        </button>
+        <button class="rate rate-good" data-rating="3">
+          <span class="rate-label">普通</span>
+          <span class="rate-interval" id="int-3">6日</span>
+        </button>
+        <button class="rate rate-easy" data-rating="4">
+          <span class="rate-label">簡単</span>
+          <span class="rate-interval" id="int-4">10日</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== STUDY DONE ===== -->
+  <section id="view-done" class="view">
+    <header class="topbar">
+      <div></div>
+      <div class="brand">完了</div>
+      <div></div>
+    </header>
+    <div class="done-content">
+      <div class="done-emoji">🎯</div>
+      <div class="done-title" id="done-title">セッション完了</div>
+      <div class="done-stats" id="done-stats"></div>
+      <button class="btn-primary" id="btn-done-home">ホームに戻る</button>
+      <button class="btn-tertiary" id="btn-done-again">もう一回</button>
+    </div>
+  </section>
+
+  <!-- ===== LIST ===== -->
+  <section id="view-list" class="view">
+    <header class="topbar">
+      <div class="brand">問題一覧</div>
+      <button class="icon-btn" id="btn-add" aria-label="追加">＋</button>
+    </header>
+    <div class="content">
+      <input type="search" id="list-search" class="search" placeholder="問題・タグ・出典を検索">
+      <div class="category-chips">
+        <button class="chip active" data-listcat="all">全て (<span id="cnt-all">0</span>)</button>
+        <button class="chip" data-listcat="common">共通 (<span id="cnt-common">0</span>)</button>
+        <button class="chip" data-listcat="solution">ソリューション (<span id="cnt-solution">0</span>)</button>
+        <button class="chip" data-listcat="engineering">エンジニア (<span id="cnt-engineering">0</span>)</button>
+      </div>
+      <div class="filter-row">
+        <select id="list-status" class="select-mini">
+          <option value="all">全状態</option>
+          <option value="new">未学習</option>
+          <option value="learning">学習中</option>
+          <option value="review">復習中</option>
+          <option value="mastered">習得済み(21日+)</option>
+          <option value="leech">苦手(失敗多)</option>
+        </select>
+        <select id="list-sort" class="select-mini">
+          <option value="created">追加が新しい順</option>
+          <option value="due">期日順</option>
+          <option value="importance">重要度順</option>
+          <option value="lapses">失敗回数順</option>
+        </select>
+      </div>
+      <ul id="question-list" class="question-list"></ul>
+    </div>
+    <nav class="tabbar">
+      <button class="tab" data-view="view-home"><span>🏠</span>ホーム</button>
+      <button class="tab active" data-view="view-list"><span>📋</span>問題</button>
+      <button class="tab" data-view="view-stats"><span>📊</span>統計</button>
+    </nav>
+  </section>
+
+  <!-- ===== EDITOR ===== -->
+  <section id="view-edit" class="view">
+    <header class="topbar">
+      <button class="icon-btn" id="btn-edit-back" aria-label="戻る">←</button>
+      <div class="brand" id="edit-title">問題を追加</div>
+      <button class="icon-btn icon-btn-danger" id="btn-edit-delete" aria-label="削除" hidden>🗑</button>
+    </header>
+    <div class="content edit-form">
+      <label class="field">
+        <span class="field-label">カテゴリ</span>
+        <div class="seg">
+          <button class="seg-opt" data-edcat="common">共通</button>
+          <button class="seg-opt" data-edcat="solution">ソリューション</button>
+          <button class="seg-opt" data-edcat="engineering">エンジニア</button>
+        </div>
+      </label>
+      <label class="field">
+        <span class="field-label">問題</span>
+        <textarea id="ed-q" rows="4" placeholder="例: KXとは何の略か?"></textarea>
+      </label>
+      <label class="field">
+        <span class="field-label">解答</span>
+        <textarea id="ed-a" rows="6" placeholder="解答(自己採点する基準)"></textarea>
+      </label>
+      <label class="field">
+        <span class="field-label">タグ (カンマ区切り)</span>
+        <input id="ed-tags" type="text" placeholder="経営計画2026, 財務目標">
+      </label>
+      <label class="field">
+        <span class="field-label">出典</span>
+        <input id="ed-source" type="text" placeholder="関西電力グループ経営計画2026 p.2">
+      </label>
+      <div class="row-pair">
+        <label class="field">
+          <span class="field-label">対象年度</span>
+          <select id="ed-year">
+            <option value="">指定なし</option>
+            <option value="2026">2026</option>
+            <option value="2025">2025</option>
+            <option value="2024">2024</option>
+            <option value="2023">2023</option>
+            <option value="2022">2022</option>
+            <option value="2021">2021</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">重要度</span>
+          <div class="stars" id="ed-stars">
+            <button class="star" data-imp="1">★</button>
+            <button class="star" data-imp="2">★</button>
+            <button class="star" data-imp="3">★</button>
+            <button class="star" data-imp="4">★</button>
+            <button class="star" data-imp="5">★</button>
+          </div>
+        </label>
+      </div>
+      <button class="btn-primary" id="btn-edit-save">保存</button>
+    </div>
+  </section>
+
+  <!-- ===== STATS ===== -->
+  <section id="view-stats" class="view">
+    <header class="topbar">
+      <div class="brand">統計</div>
+      <div></div>
+    </header>
+    <div class="content">
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-num" id="stat-total">0</div><div class="stat-label">問題総数</div></div>
+        <div class="stat-card"><div class="stat-num" id="stat-mastered">0</div><div class="stat-label">習得済</div></div>
+        <div class="stat-card"><div class="stat-num" id="stat-review">0</div><div class="stat-label">復習中</div></div>
+        <div class="stat-card"><div class="stat-num" id="stat-learning">0</div><div class="stat-label">学習中</div></div>
+        <div class="stat-card"><div class="stat-num" id="stat-newq">0</div><div class="stat-label">未学習</div></div>
+        <div class="stat-card"><div class="stat-num" id="stat-leech">0</div><div class="stat-label">苦手</div></div>
+      </div>
+      <div class="stats-section">
+        <h3>直近30日の学習量</h3>
+        <div id="heatmap" class="heatmap"></div>
+      </div>
+      <div class="stats-section">
+        <h3>カテゴリ別の習得進捗</h3>
+        <div id="cat-progress"></div>
+      </div>
+      <div class="stats-section">
+        <h3>試験までの推定進捗</h3>
+        <div id="forecast" class="forecast"></div>
+      </div>
+    </div>
+    <nav class="tabbar">
+      <button class="tab" data-view="view-home"><span>🏠</span>ホーム</button>
+      <button class="tab" data-view="view-list"><span>📋</span>問題</button>
+      <button class="tab active" data-view="view-stats"><span>📊</span>統計</button>
+    </nav>
+  </section>
+
+  <!-- ===== SETTINGS ===== -->
+  <section id="view-settings" class="view">
+    <header class="topbar">
+      <button class="icon-btn" id="btn-settings-back" aria-label="戻る">←</button>
+      <div class="brand">設定</div>
+      <div></div>
+    </header>
+    <div class="content">
+      <div class="settings-section">
+        <h3>試験</h3>
+        <label class="field">
+          <span class="field-label">試験日</span>
+          <input type="date" id="set-exam-date">
+        </label>
+      </div>
+
+      <div class="settings-section">
+        <h3>学習量</h3>
+        <label class="field">
+          <span class="field-label">1日の新規問題上限</span>
+          <input type="number" id="set-new-per-day" min="0" max="100" value="10">
+        </label>
+        <label class="field">
+          <span class="field-label">1日の復習上限</span>
+          <input type="number" id="set-rev-per-day" min="0" max="500" value="100">
+        </label>
+        <label class="field">
+          <span class="field-label">混合学習の比率(新規:復習)</span>
+          <select id="set-mix-ratio">
+            <option value="2:8">2:8(復習重視)</option>
+            <option value="3:7" selected>3:7</option>
+            <option value="5:5">5:5(均等)</option>
+            <option value="7:3">7:3(新規重視)</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="settings-section">
+        <h3>表示</h3>
+        <label class="field">
+          <span class="field-label">テーマ</span>
+          <select id="set-theme">
+            <option value="auto">自動(端末設定)</option>
+            <option value="light">ライト</option>
+            <option value="dark">ダーク</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">問題本文の文字サイズ</span>
+          <select id="set-font-size">
+            <option value="s">小</option>
+            <option value="m" selected>中</option>
+            <option value="l">大</option>
+            <option value="xl">特大</option>
+          </select>
+        </label>
+        <label class="field-row">
+          <span class="field-label">音声読み上げをデフォルトで有効化</span>
+          <input type="checkbox" id="set-tts-auto">
+        </label>
+      </div>
+
+      <div class="settings-section">
+        <h3>データ管理(PC↔iPhone同期)</h3>
+        <p class="hint">問題と進捗をJSONで書き出し/読み込み。PCで作成→iPhoneで取り込みなどに使えます。</p>
+        <button class="btn-tertiary" id="btn-export">📤 全データをエクスポート(JSON)</button>
+        <button class="btn-tertiary" id="btn-import">📥 JSONから読み込み(問題のみマージ)</button>
+        <button class="btn-tertiary" id="btn-import-full">📥 JSONから完全復元(進捗ごと上書き)</button>
+        <input type="file" id="file-import" accept="application/json,.json" hidden>
+        <button class="btn-tertiary" id="btn-import-csv">📥 CSV/TSVから問題インポート</button>
+        <input type="file" id="file-import-csv" accept=".csv,.tsv,text/csv,text/tab-separated-values" hidden>
+        <button class="btn-tertiary" id="btn-load-seed">📦 シード問題を再読込(マージ)</button>
+      </div>
+
+      <div class="settings-section">
+        <h3>危険な操作</h3>
+        <button class="btn-danger" id="btn-reset-progress">学習進捗のみリセット</button>
+        <button class="btn-danger" id="btn-reset-all">全データを削除</button>
+      </div>
+
+      <div class="settings-section about">
+        <h3>このアプリ</h3>
+        <p>SM-2間隔反復・アクティブリコール・インターリービングを採用。完全オフライン動作・無料。</p>
+        <p class="hint">v1.0 / Build 2026.05</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<!-- Modal confirm -->
+<div id="modal" class="modal" hidden>
+  <div class="modal-card">
+    <div class="modal-msg" id="modal-msg"></div>
+    <div class="modal-actions">
+      <button class="btn-tertiary" id="modal-cancel">キャンセル</button>
+      <button class="btn-danger" id="modal-ok">実行</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
