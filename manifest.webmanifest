@@ -1,13 +1,13 @@
 {
   "name": "昇進試験 学習",
   "short_name": "昇進試験",
-  "description": "関西電力グループ昇進試験(2026年8月)向け学習アプリ。SM-2間隔反復・アクティブリコール採用。",
+  "description": "関西電力グループ昇進試験向け学習アプリ。SM-2間隔反復・アクティブリコール・穴埋め式採用。",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#FAF7F2",
-  "theme_color": "#1A2238",
+  "background_color": "#08090F",
+  "theme_color": "#08090F",
   "lang": "ja",
   "dir": "ltr",
   "icons": [

@@ -408,6 +408,9 @@ function renderHome() {
   const { due, newq } = getDeckCounts(state.selectedCat);
   document.getElementById('num-due').textContent = due;
   document.getElementById('num-new').textContent = newq;
+  const heroTotal = due + newq;
+  const heroEl = document.getElementById('hero-total');
+  if (heroEl) heroEl.textContent = heroTotal;
 
   // Streak
   document.getElementById('num-streak').textContent = computeStreak();
