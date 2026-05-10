@@ -192,6 +192,16 @@ function escapeHtml(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+// 【】を穴に変換、答え側の① ②等を強調表示
+function renderBlanks(text) {
+  return escapeHtml(text).replace(/【([^】]*)】/g, (m, inner) => {
+    return `<span class="blank">${inner || '　'}</span>`;
+  });
+}
+function renderAnswer(text) {
+  // 改行は維持。①②...を少し強調。
+  return escapeHtml(text).replace(/([①-⑳])/g, '<span class="ans-num">$1</span>');
+}
 function uid(prefix = 'q') {
   return prefix + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 }
@@ -584,9 +594,9 @@ function renderStudy() {
   if (q.year) meta.push(`<span>(${q.year}年度)</span>`);
   document.getElementById('study-meta').innerHTML = meta.join(' ');
 
-  document.getElementById('study-question').textContent = q.question;
+  document.getElementById('study-question').innerHTML = renderBlanks(q.question);
   const ansEl = document.getElementById('study-answer');
-  ansEl.textContent = q.answer;
+  ansEl.innerHTML = renderAnswer(q.answer);
   ansEl.hidden = true;
 
   // Reset action area

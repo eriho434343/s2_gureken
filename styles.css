@@ -108,6 +108,33 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
+/* HTML hidden属性を確実に効かせる(.modal等で上書きされるのを防ぐ) */
+[hidden] { display: none !important; }
+
+/* 穴埋め【】を視覚的に強調 */
+.blank {
+  display: inline-block;
+  min-width: 2.4em;
+  padding: 0 0.5em;
+  margin: 0 0.15em;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 4px;
+  font-weight: 600;
+  font-style: normal;
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI", sans-serif;
+  font-size: 0.92em;
+  letter-spacing: 0.02em;
+  border-bottom: 2px solid var(--accent);
+  vertical-align: baseline;
+}
+.ans-num {
+  display: inline-block;
+  margin: 0 0.2em 0 0;
+  color: var(--accent);
+  font-weight: 600;
+}
+
 html, body {
   margin: 0;
   padding: 0;

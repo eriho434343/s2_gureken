@@ -203,20 +203,20 @@
         </div>
       </label>
       <label class="field">
-        <span class="field-label">問題</span>
-        <textarea id="ed-q" rows="4" placeholder="例: KXとは何の略か?"></textarea>
+        <span class="field-label">問題 (穴埋めは【】または【①】【②】で囲む)</span>
+        <textarea id="ed-q" rows="4" placeholder="例: ROIC【①】%以上、ROE【②】%以上" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
       </label>
       <label class="field">
         <span class="field-label">解答</span>
-        <textarea id="ed-a" rows="6" placeholder="解答(自己採点する基準)"></textarea>
+        <textarea id="ed-a" rows="6" placeholder="例: ① 3.3　② 8.0" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
       </label>
       <label class="field">
         <span class="field-label">タグ (カンマ区切り)</span>
-        <input id="ed-tags" type="text" placeholder="経営計画2026, 財務目標">
+        <input id="ed-tags" type="text" placeholder="経営計画2026, 財務目標" autocomplete="off">
       </label>
       <label class="field">
         <span class="field-label">出典</span>
-        <input id="ed-source" type="text" placeholder="関西電力グループ経営計画2026 p.2">
+        <input id="ed-source" type="text" placeholder="関西電力グループ経営計画2026 p.2" autocomplete="off">
       </label>
       <div class="row-pair">
         <label class="field">
@@ -362,9 +362,15 @@
       </div>
 
       <div class="settings-section about">
+        <h3>プライバシー</h3>
+        <p>このアプリで追加した問題・進捗は、すべてこの端末のIndexedDBにのみ保存されます。GitHubや外部サーバーに送信されることは一切ありません。社外秘の問題はここで追加・インポートしてください。</p>
+        <p class="hint">通信が発生するのは初回ダウンロード時(GitHub Pagesからアプリ本体を取得)のみ。アプリ起動後は完全オフラインで動作します。分析・トラッキングは行いません。</p>
+      </div>
+
+      <div class="settings-section about">
         <h3>このアプリ</h3>
-        <p>SM-2間隔反復・アクティブリコール・インターリービングを採用。完全オフライン動作・無料。</p>
-        <p class="hint">v1.0 / Build 2026.05</p>
+        <p>SM-2間隔反復・アクティブリコール・インターリービング・穴埋め式を採用。完全オフライン動作・無料。</p>
+        <p class="hint">v1.1 / Build 2026.05 (修正: モーダル表示, 穴埋め式)</p>
       </div>
     </div>
   </section>
