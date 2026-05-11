@@ -18,13 +18,15 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
+const APP_VERSION = '1.3.0';  // バージョンが変わっても IndexedDB のデータは保持される
+
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
 const state = {
   questions: [],          // [{id, category, question, answer, ...}]
   progress: {},           // {questionId: {ease, interval, reps, due, ...}}
   settings: {
-    examDate: '2026-08-31',
+    examDate: '',
     newPerDay: 10,
     revPerDay: 100,
     mixRatio: '3:7',
@@ -61,6 +63,7 @@ function openDB() {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const d = e.target.result;
+      // IMPORTANT: 既存ストアは絶対に削除しない。なければ作るだけ。
       if (!d.objectStoreNames.contains(STORE_Q)) {
         const s = d.createObjectStore(STORE_Q, { keyPath: 'id' });
         s.createIndex('category', 'category');
@@ -245,6 +248,9 @@ async function init() {
   // Reset today's counters if new day
   await resetTodayIfNeeded();
 
+  // バージョン確認: 更新があれば「学習履歴は保持されています」と通知
+  await checkVersionAndNotify();
+
   // Wire UI
   bindEvents();
 
@@ -254,11 +260,17 @@ async function init() {
   // Hide loader
   document.getElementById('loader').remove();
   document.getElementById('app').hidden = false;
+}
 
-  // Register SW
-  if ('serviceWorker' in navigator) {
-    try { await navigator.serviceWorker.register('sw.js'); } catch (e) { /* ok */ }
+// アプリバージョン管理: 更新検出と履歴保護通知
+async function checkVersionAndNotify() {
+  const storedVersion = await metaGet('appVersion');
+  if (storedVersion && storedVersion !== APP_VERSION) {
+    // バージョンが変わった = アプリが更新された
+    // IndexedDB のデータ(問題・進捗)は一切触れていないので安全
+    setTimeout(() => toast('✓ アプリが更新されました。学習履歴は保持されています'), 2000);
   }
+  await metaSet('appVersion', APP_VERSION);
 }
 
 async function loadSettings() {
