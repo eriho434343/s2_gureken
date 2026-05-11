@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '1.3.0';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '1.3.1';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -665,8 +665,9 @@ async function rate(rating) {
   else if (rating === 3) state.studyStats.good += 1;
   else if (rating === 4) state.studyStats.easy += 1;
 
-  // If rated Again, requeue near end of session for re-attempt
-  if (rating === 1) {
+  // 「もう一度」の再出題: 一度でも学習済みのカードのみ同セッション内で再出題
+  // 新規カード(初見)に「もう一度」を押した場合は翌日に回す(再出題しない)
+  if (rating === 1 && !wasNew) {
     const requeuePos = Math.min(state.studyDeck.length, state.studyIdx + 4);
     state.studyDeck.splice(requeuePos, 0, q);
   }
