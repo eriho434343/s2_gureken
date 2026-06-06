@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '1.4.0';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '1.5.0';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -209,6 +209,16 @@ function renderAnswer(text) {
 function uid(prefix = 'q') {
   return prefix + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 }
+// 問題文+解答の内容ハッシュ。これが変わった=内容が編集された とみなし、進捗をリセットする。
+// タグ・重要度・出典・年度だけの変更ではハッシュは変わらない(学習する中身は同じため)。
+function contentHash(q) {
+  const str = (q.question || '') + '\u0000' + (q.answer || '');
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  }
+  return (h >>> 0).toString(36);
+}
 function shuffle(arr) {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
@@ -325,6 +335,7 @@ async function loadSeed(merge = true) {
         createdAt: q.createdAt || new Date().toISOString(),
         modifiedAt: new Date().toISOString(),
       };
+      rec.contentHash = contentHash(rec);
       await dbPut(STORE_Q, rec);
       const idx = state.questions.findIndex(x => x.id === rec.id);
       if (idx >= 0) state.questions[idx] = rec; else state.questions.push(rec);
@@ -839,8 +850,10 @@ async function saveEditor() {
   const author = document.getElementById('ed-author').value.trim();
 
   let rec;
+  let didResetProgress = false;
   if (state.editingId) {
     rec = state.questions.find(x => x.id === state.editingId);
+    const oldHash = rec.contentHash || contentHash(rec);
     rec.category = state.editingCat;
     rec.question = qText;
     rec.answer = aText;
@@ -850,6 +863,14 @@ async function saveEditor() {
     rec.importance = state.editingImp;
     rec.author = author || rec.author || '';
     rec.modifiedAt = new Date().toISOString();
+    const newHash = contentHash(rec);
+    rec.contentHash = newHash;
+    // 内容(問題文/解答)が変わったら新規問題として扱う = 進捗をリセット
+    if (oldHash !== newHash && state.progress[rec.id]) {
+      await dbDel(STORE_P, rec.id);
+      delete state.progress[rec.id];
+      didResetProgress = true;
+    }
   } else {
     rec = {
       id: uid(),
@@ -859,13 +880,14 @@ async function saveEditor() {
       tags, source, year,
       importance: state.editingImp,
       author: author || state.settings.authorName || '',
+      contentHash: contentHash({ question: qText, answer: aText }),
       createdAt: new Date().toISOString(),
       modifiedAt: new Date().toISOString(),
     };
     state.questions.push(rec);
   }
   await dbPut(STORE_Q, rec);
-  toast(state.editingId ? '保存しました' : '追加しました');
+  toast(!state.editingId ? '追加しました' : (didResetProgress ? '保存しました(内容変更のため学習履歴をリセット)' : '保存しました'));
   state.editingId = null;
   renderHome();
   renderList();
@@ -1062,42 +1084,67 @@ async function importQuestionsReplace(file) {
     const incoming = data.questions;
     const count = incoming.length;
 
-    // 差分を事前計算してユーザーに見せる
-    const existingIds = new Set(state.questions.map(q => q.id));
-    const incomingIds = new Set(incoming.map(q => q.id).filter(Boolean));
-    let added = 0, updated = 0, removed = 0;
-    for (const q of incoming) {
-      if (q.id && existingIds.has(q.id)) updated++; else added++;
+    // 既存問題のid→内容ハッシュ のマップ
+    const existingHash = {};
+    for (const q of state.questions) {
+      existingHash[q.id] = q.contentHash || contentHash(q);
     }
-    for (const id of existingIds) {
+    const incomingIds = new Set(incoming.map(q => q.id).filter(Boolean));
+
+    // 差分を計算: 追加/更新/削除/内容変更(=進捗リセット対象)
+    let added = 0, updatedMeta = 0, removed = 0;
+    const resetIds = [];   // 内容が変わった→新規扱い(進捗リセット)
+    for (const q of incoming) {
+      const h = contentHash(q);
+      q.contentHash = h;
+      if (q.id && existingHash[q.id] !== undefined) {
+        if (existingHash[q.id] !== h) {
+          // 問題文/解答が変わった → 新規問題として扱う
+          if (state.progress[q.id]) resetIds.push(q.id);
+        } else {
+          updatedMeta++;  // 内容同じ(メタのみ変更の可能性)
+        }
+      } else {
+        added++;
+      }
+    }
+    for (const id of Object.keys(existingHash)) {
       if (!incomingIds.has(id)) removed++;
     }
-    // 進捗が残る(=引き継がれる)問題数
-    const keptProgress = Object.keys(state.progress).filter(qid => incomingIds.has(qid)).length;
 
     const ok = await confirm(
       `PCの問題でスマホを同期します。\n\n` +
-      `更新 ${updated}件 / 追加 ${added}件 / 削除 ${removed}件\n` +
-      `(合計 ${count}問になります)\n\n` +
-      `学習履歴・SM-2進捗は保持されます。\n` +
+      `合計 ${count}問になります\n` +
+      `・新規追加: ${added}件\n` +
+      `・内容変更で新規扱い(履歴リセット): ${resetIds.length}件\n` +
+      `・削除: ${removed}件\n\n` +
+      `内容を変えていない問題の学習履歴は保持されます。\n` +
       `続けますか?`
     );
     if (!ok) return;
 
-    // 問題バンクを全置換 (progressストアは触らない)
+    // 問題バンクを全置換
     await dbClear(STORE_Q);
     state.questions = [];
     for (const q of incoming) {
       if (!q.id) q.id = uid();
       if (!q.category) q.category = 'common';
+      if (!q.contentHash) q.contentHash = contentHash(q);
       if (!q.createdAt) q.createdAt = new Date().toISOString();
       if (!q.modifiedAt) q.modifiedAt = q.createdAt;
       state.questions.push(q);
       await dbPut(STORE_Q, q);
     }
-    // ※progressストアは意図的に未変更。削除済み問題の進捗レコードは無害に残る。
 
-    toast(`✓ 同期完了: 全${count}問 / 進捗${keptProgress}件を保持`);
+    // 内容が変わった問題の進捗をリセット(新規問題として扱う)
+    for (const id of resetIds) {
+      await dbDel(STORE_P, id);
+      delete state.progress[id];
+    }
+    // ※内容が同じ問題の進捗はそのまま保持。削除済み問題の進捗レコードは無害に残る。
+
+    const kept = Object.keys(state.progress).filter(qid => incomingIds.has(qid)).length;
+    toast(`✓ 同期完了: 全${count}問 / 履歴保持${kept}件 / リセット${resetIds.length}件`);
     renderHome(); renderList(); renderStats();
   } catch (e) {
     console.error(e);
@@ -1123,6 +1170,7 @@ async function importJSON(file, full) {
       if (!q.category) q.category = 'common';
       if (!q.createdAt) q.createdAt = new Date().toISOString();
       if (!q.modifiedAt) q.modifiedAt = q.createdAt;
+      if (!q.contentHash) q.contentHash = contentHash(q);
 
       const existing = state.questions.find(x => x.id === q.id);
       if (existing) {
@@ -1202,6 +1250,7 @@ async function importCSV(file) {
         createdAt: new Date().toISOString(),
         modifiedAt: new Date().toISOString(),
       };
+      q.contentHash = contentHash(q);
       state.questions.push(q);
       await dbPut(STORE_Q, q);
       n++;
