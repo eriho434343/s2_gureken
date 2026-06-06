@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '1.3.1';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '1.4.0';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -1047,6 +1047,64 @@ function downloadJSON(data, filename) {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
 }
 
+// PC → スマホ同期: 問題バンクを丸ごと置き換える。
+// SM-2の学習進捗(progressストア)には一切触れない。
+// - 同じid: 問題内容が更新され、進捗は引き継がれる
+// - importに無いid: スマホから問題が消える(進捗レコードは残るが無害。再追加すれば復活)
+// - 新しいid: 新規問題として追加され、進捗はまっさら
+async function importQuestionsReplace(file) {
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (!data || !Array.isArray(data.questions)) {
+      throw new Error('不正なファイル(questions配列が見つかりません)');
+    }
+    const incoming = data.questions;
+    const count = incoming.length;
+
+    // 差分を事前計算してユーザーに見せる
+    const existingIds = new Set(state.questions.map(q => q.id));
+    const incomingIds = new Set(incoming.map(q => q.id).filter(Boolean));
+    let added = 0, updated = 0, removed = 0;
+    for (const q of incoming) {
+      if (q.id && existingIds.has(q.id)) updated++; else added++;
+    }
+    for (const id of existingIds) {
+      if (!incomingIds.has(id)) removed++;
+    }
+    // 進捗が残る(=引き継がれる)問題数
+    const keptProgress = Object.keys(state.progress).filter(qid => incomingIds.has(qid)).length;
+
+    const ok = await confirm(
+      `PCの問題でスマホを同期します。\n\n` +
+      `更新 ${updated}件 / 追加 ${added}件 / 削除 ${removed}件\n` +
+      `(合計 ${count}問になります)\n\n` +
+      `学習履歴・SM-2進捗は保持されます。\n` +
+      `続けますか?`
+    );
+    if (!ok) return;
+
+    // 問題バンクを全置換 (progressストアは触らない)
+    await dbClear(STORE_Q);
+    state.questions = [];
+    for (const q of incoming) {
+      if (!q.id) q.id = uid();
+      if (!q.category) q.category = 'common';
+      if (!q.createdAt) q.createdAt = new Date().toISOString();
+      if (!q.modifiedAt) q.modifiedAt = q.createdAt;
+      state.questions.push(q);
+      await dbPut(STORE_Q, q);
+    }
+    // ※progressストアは意図的に未変更。削除済み問題の進捗レコードは無害に残る。
+
+    toast(`✓ 同期完了: 全${count}問 / 進捗${keptProgress}件を保持`);
+    renderHome(); renderList(); renderStats();
+  } catch (e) {
+    console.error(e);
+    toast('同期失敗: ' + e.message);
+  }
+}
+
 async function importJSON(file, full) {
   try {
     const text = await file.text();
@@ -1322,10 +1380,18 @@ function bindEvents() {
   // Settings: import/export
   document.getElementById('btn-export-all').addEventListener('click', exportAll);
   document.getElementById('btn-export-questions').addEventListener('click', exportQuestionsOnly);
-  document.getElementById('btn-import-questions').addEventListener('click', () => {
-    document.getElementById('file-import').dataset.full = '0';
-    document.getElementById('file-import').click();
+
+  // PC -> phone sync (replace question bank, preserve progress)
+  document.getElementById('btn-import-replace').addEventListener('click', () => {
+    document.getElementById('file-import-replace').click();
   });
+  document.getElementById('file-import-replace').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    await importQuestionsReplace(f);
+    e.target.value = '';
+  });
+
+  // Full restore (overwrite progress too)
   document.getElementById('btn-import-full').addEventListener('click', () => {
     document.getElementById('file-import').dataset.full = '1';
     document.getElementById('file-import').click();
@@ -1348,9 +1414,6 @@ function bindEvents() {
     await importCSV(f);
     e.target.value = '';
   });
-  document.getElementById('btn-load-seed').addEventListener('click', () => loadSeed(true).then(() => {
-    renderHome(); renderList(); renderStats();
-  }));
 
   // Settings: reset
   document.getElementById('btn-reset-progress').addEventListener('click', async () => {

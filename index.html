@@ -391,30 +391,45 @@
       </div>
 
       <div class="settings-section">
-        <h3>自分用バックアップ</h3>
-        <p class="hint">問題＋進捗＋設定を1ファイルに。複数端末で自分のデータを移すときや、定期バックアップに。</p>
-        <button class="btn-tertiary" id="btn-export-all">📤 全データをエクスポート(JSON)</button>
-        <button class="btn-tertiary" id="btn-import-full">📥 完全復元(進捗ごと上書き)</button>
+        <h3>PC → スマホ 問題を同期</h3>
+        <div class="sync-flow-card">
+          <div class="sync-step">
+            <span class="sync-num">1</span>
+            <div class="sync-body">
+              <div class="sync-label">PCのブラウザで</div>
+              <button class="btn-sync-action" id="btn-export-questions">📤 問題をエクスポート</button>
+            </div>
+          </div>
+          <div class="sync-arrow">↓ AirDrop などで転送 ↓</div>
+          <div class="sync-step">
+            <span class="sync-num">2</span>
+            <div class="sync-body">
+              <div class="sync-label">このスマホで</div>
+              <button class="btn-sync-action btn-sync-primary" id="btn-import-replace">📥 PCから同期する</button>
+            </div>
+          </div>
+          <ul class="sync-notes">
+            <li>PCの最新問題に全て置き換え</li>
+            <li>学習履歴・SM-2進捗は完全保持</li>
+            <li>PCで削除した問題も反映</li>
+          </ul>
+        </div>
+        <input type="file" id="file-import-replace" accept="application/json,.json" hidden>
       </div>
 
       <div class="settings-section">
-        <h3>他の人と問題を共有</h3>
-        <p class="hint">問題だけをファイルにして渡す/もらう。学習履歴は端末ごとなので、もらった問題も自分のペースで進められます。</p>
-        <button class="btn-tertiary" id="btn-export-questions">📤 問題のみエクスポート(JSON)</button>
-        <button class="btn-tertiary" id="btn-import-questions">📥 問題のみインポート(マージ)</button>
+        <h3>バックアップ・復元</h3>
+        <p class="hint">スマホのデータを丸ごと別端末に移す場合や定期バックアップに。</p>
+        <button class="btn-tertiary" id="btn-export-all">📤 全データをエクスポート(進捗込み)</button>
+        <button class="btn-tertiary" id="btn-import-full">📥 完全復元(進捗ごと上書き)</button>
+        <input type="file" id="file-import" accept="application/json,.json" hidden>
       </div>
 
       <div class="settings-section">
         <h3>Excel・Wordから取り込み</h3>
-        <p class="hint">過去問のExcel/Wordをタブ区切り(またはCSV)で書き出して取込。フォーマットはREADME参照。</p>
-        <button class="btn-tertiary" id="btn-import-csv">📥 CSV/TSVから問題インポート</button>
-        <input type="file" id="file-import" accept="application/json,.json" hidden>
+        <p class="hint">CSV かタブ区切りで書き出して取込。必須列: category, question, answer</p>
+        <button class="btn-tertiary" id="btn-import-csv">📥 CSV / TSV から問題インポート</button>
         <input type="file" id="file-import-csv" accept=".csv,.tsv,text/csv,text/tab-separated-values" hidden>
-      </div>
-
-      <div class="settings-section">
-        <h3>シード問題</h3>
-        <button class="btn-tertiary" id="btn-load-seed">📦 シード問題を再読込(マージ)</button>
       </div>
 
       <div class="settings-section">
@@ -423,7 +438,7 @@
         <button class="btn-danger" id="btn-reset-all">全データを削除</button>
       </div>
 
-      <div class="settings-section about">
+            <div class="settings-section about">
         <h3>プライバシー</h3>
         <p>このアプリで追加した問題・進捗は、すべてこの端末のIndexedDBにのみ保存されます。GitHubや外部サーバーに送信されることは一切ありません。社外秘の問題はここで追加・インポートしてください。</p>
         <p class="hint">通信が発生するのは初回ダウンロード時(GitHub Pagesからアプリ本体を取得)のみ。アプリ起動後は完全オフラインで動作します。分析・トラッキングは行いません。</p>
@@ -432,7 +447,7 @@
       <div class="settings-section about">
         <h3>このアプリ</h3>
         <p>SM-2間隔反復・アクティブリコール・インターリービング・穴埋め式を採用。完全オフライン動作・無料。</p>
-        <p class="hint">v1.2 / Build 2026.05 (修正: モーダル, 穴埋め, 複数人共有)</p>
+        <p class="hint">v1.4 / Build 2026.05 (PC→スマホ同期・進捗保持)</p>
       </div>
     </div>
   </section>

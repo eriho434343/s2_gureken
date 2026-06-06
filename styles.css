@@ -1140,6 +1140,83 @@ input:focus, textarea:focus, select:focus {
 }
 .btn-danger:active { transform: scale(0.99); background: var(--bg-2); }
 
+/* ===== Sync flow card (PC→スマホ) ===== */
+.sync-flow-card {
+  background: linear-gradient(165deg, color-mix(in srgb, var(--primary) 8%, var(--bg-1)) 0%, var(--bg-1) 55%);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  padding: 18px 16px;
+  box-shadow: var(--shadow-2);
+}
+.sync-step {
+  display: flex; align-items: center; gap: 12px;
+}
+.sync-num {
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--primary-on);
+  font-size: 14px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px var(--primary-glow);
+}
+.sync-body { flex: 1; min-width: 0; }
+.sync-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.btn-sync-action {
+  width: 100%;
+  padding: 13px 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 14px; font-weight: 600;
+  text-align: center;
+  transition: transform 0.1s var(--ease-out), box-shadow 0.2s;
+}
+.btn-sync-action:active { transform: scale(0.98); }
+.btn-sync-primary {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-2) 100%);
+  color: var(--primary-on);
+  border-color: transparent;
+  box-shadow: 0 6px 18px var(--primary-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.sync-arrow {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-faint);
+  letter-spacing: 0.05em;
+  padding: 10px 0;
+}
+.sync-notes {
+  margin: 14px 0 0;
+  padding: 12px 14px 12px 14px;
+  list-style: none;
+  background: var(--primary-soft);
+  border-radius: var(--r-md);
+}
+.sync-notes li {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  padding-left: 20px;
+  position: relative;
+  margin: 3px 0;
+}
+.sync-notes li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  color: var(--primary);
+  font-weight: 700;
+}
+
 /* ===== Toast ===== */
 .toast {
   position: fixed;
