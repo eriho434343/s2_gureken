@@ -85,6 +85,12 @@
       </div>
 
       <div class="session-options">
+        <span class="opt-label">学習スタイル</span>
+        <button class="opt active" data-style="study">学習(見るだけ)</button>
+        <button class="opt" data-style="quiz">解答(入力)</button>
+      </div>
+
+      <div class="session-options">
         <span class="opt-label">セッション長</span>
         <button class="opt active" data-size="10">10問</button>
         <button class="opt" data-size="20">20問</button>
@@ -123,10 +129,21 @@
       <div class="study-meta" id="study-meta"></div>
       <div class="study-question" id="study-question"></div>
       <div class="study-answer" id="study-answer" hidden></div>
+
+      <!-- 解答モード: 穴ごとの入力と判定 -->
+      <div class="quiz-area" id="quiz-area" hidden>
+        <div class="quiz-blank-label" id="quiz-blank-label"></div>
+        <input type="text" id="quiz-input" class="quiz-input" placeholder="解答を入力" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">
+        <div class="quiz-feedback" id="quiz-feedback" hidden></div>
+      </div>
     </div>
 
     <div class="study-actions">
       <button class="btn-show-answer" id="btn-show-answer">答えを見る</button>
+      <!-- 解答モードのボタン -->
+      <button class="btn-show-answer" id="btn-quiz-judge" hidden>判定する</button>
+      <button class="btn-show-answer" id="btn-quiz-next" hidden>次へ</button>
+      <button class="btn-quiz-manual" id="btn-quiz-manual" hidden>評価を手動で選ぶ</button>
       <div class="rating-grid" id="rating-grid" hidden>
         <button class="rate rate-again" data-rating="1">
           <span class="rate-label">もう一度</span>
@@ -442,7 +459,7 @@
       <div class="settings-section about">
         <h3>このアプリ</h3>
         <p>SM-2間隔反復・アクティブリコール・インターリービング・穴埋め式を採用。完全オフライン動作・無料。</p>
-        <p class="hint">v1.6 / Build 2026.05 (CSV正本・完全同期)</p>
+        <p class="hint">v1.8 / Build 2026.05 (CSV-Q&A形式・自動評価)</p>
       </div>
     </div>
   </section>

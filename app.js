@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '1.6.0';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '1.8.0';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -42,6 +42,8 @@ const state = {
   studyStats: { again: 0, hard: 0, good: 0, easy: 0, total: 0 },
   selectedCat: 'all',
   selectedSize: 10,
+  studyStyle: 'study',    // 'study'(見るだけ) | 'quiz'(入力判定)
+  quiz: { blanks: [], idx: 0, results: [] },  // 解答モードの進行状態
   listCat: 'all',
   listStatus: 'all',
   listSort: 'created',
@@ -206,6 +208,104 @@ function renderAnswer(text) {
   // 改行は維持。①②...を少し強調。
   return escapeHtml(text).replace(/([①-⑳])/g, '<span class="ans-num">$1</span>');
 }
+
+// 丸数字 ⇔ 整数
+const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
+function circledToNum(s) {
+  const i = CIRCLED.indexOf((s || '').trim());
+  return i >= 0 ? i + 1 : null;
+}
+function numToCircled(n) {
+  return (n >= 1 && n <= CIRCLED.length) ? CIRCLED[n - 1] : String(n);
+}
+
+// 解答モード用: 問題文の穴と解答を対応づけて [{label, answer}] を返す。穴が無ければnull。
+function parseQuizBlanks(question, answer) {
+  const matches = [...(question || '').matchAll(/【([^】]*)】/g)];
+  const numBlanks = matches.length;
+  if (numBlanks === 0) return null;
+
+  // 解答を ①②… マーカーで分割
+  const parts = {};
+  let hasMarkers = false;
+  const re = /([①-⑳])\s*[:：]?\s*([^①-⑳]*)/g;
+  let m;
+  while ((m = re.exec(answer || '')) !== null) {
+    const n = circledToNum(m[1]);
+    if (n) { parts[n] = (m[2] || '').replace(/^[\s　]+|[\s　]+$/g, ''); hasMarkers = true; }
+  }
+
+  const out = [];
+  for (let i = 0; i < numBlanks; i++) {
+    const inner = (matches[i][1] || '').trim();
+    const blankNum = circledToNum(inner) || (i + 1);
+    let ans;
+    if (hasMarkers && parts[blankNum] !== undefined) {
+      ans = parts[blankNum];
+    } else if (numBlanks === 1) {
+      ans = (answer || '').trim();
+    } else {
+      ans = (parts[blankNum] !== undefined) ? parts[blankNum] : (answer || '').trim();
+    }
+    out.push({ label: inner || numToCircled(i + 1), answer: ans });
+  }
+  return out;
+}
+
+// 比較用の正規化(全半角・大小・空白・カンマを吸収)
+function normalizeAns(s) {
+  let t = (s || '');
+  try { t = t.normalize('NFKC'); } catch (e) {}
+  return t.toLowerCase().replace(/[\s　]+/g, '').replace(/[、,，]/g, '').trim();
+}
+function stripParens(s) {
+  return (s || '').replace(/[(（][^)）]*[)）]/g, '');
+}
+// 入力が正解かどうか(完全一致 or 括弧書きを除いた一致)
+function judgeAnswer(input, expected) {
+  const ni = normalizeAns(input);
+  if (!ni) return false;
+  const ne = normalizeAns(expected);
+  if (ni === ne) return true;
+  const ne2 = normalizeAns(stripParens(expected));
+  if (ne2 && ni === ne2) return true;
+  return false;
+}
+
+// CSVのQ&A1列形式 → 内部形式 {question, answer}
+// 例: "【業績】や【事業活動】を【コンプライアンス】に..." →
+//     question: "【①】や【②】を【③】に...", answer: "① 業績　② 事業活動　③ コンプライアンス"
+//     単一穴 "基準価格は【10.82】円" → question: "基準価格は【】円", answer: "10.82"
+function parseQACell(qa) {
+  const text = (qa || '').trim();
+  if (!text) return null;
+  const matches = [...text.matchAll(/【([^】]*)】/g)];
+  if (matches.length === 0) {
+    // 穴が無い → 問題文のみ(解答空)。フィルイン用途では稀。
+    return { question: text, answer: '' };
+  }
+  const blanks = [];
+  if (matches.length === 1) {
+    const question = text.replace(/【([^】]*)】/, (m, inner) => { blanks.push(inner.trim()); return '【】'; });
+    return { question, answer: blanks[0] };
+  }
+  const question = text.replace(/【([^】]*)】/g, (m, inner) => { blanks.push(inner.trim()); return `【${numToCircled(blanks.length)}】`; });
+  const answer = blanks.map((b, i) => `${numToCircled(i + 1)} ${b}`).join('　');
+  return { question, answer };
+}
+
+// 内部形式 → Q&A1列形式(エクスポート用)
+function buildQACell(question, answer) {
+  const blanks = parseQuizBlanks(question, answer);
+  if (!blanks || blanks.length === 0) return question || '';
+  let i = 0;
+  return (question || '').replace(/【[^】]*】/g, () => {
+    const b = blanks[i++];
+    return `【${b ? b.answer : ''}】`;
+  });
+}
+
+
 function uid(prefix = 'q') {
   return prefix + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 }
@@ -627,16 +727,178 @@ function renderStudy() {
   ansEl.innerHTML = renderAnswer(q.answer);
   ansEl.hidden = true;
 
-  // Reset action area
-  document.getElementById('btn-show-answer').hidden = false;
+  // Reset all action elements
+  document.getElementById('btn-show-answer').hidden = true;
+  document.getElementById('btn-quiz-judge').hidden = true;
+  document.getElementById('btn-quiz-next').hidden = true;
+  document.getElementById('btn-quiz-manual').hidden = true;
   document.getElementById('rating-grid').hidden = true;
+  document.getElementById('quiz-area').hidden = true;
+  document.getElementById('quiz-feedback').hidden = true;
+
+  // 解答モード: 穴をパースできれば quiz UI、できなければ study UI にフォールバック
+  const quizBlanks = state.studyStyle === 'quiz' ? parseQuizBlanks(q.question, q.answer) : null;
+  if (quizBlanks && quizBlanks.length > 0) {
+    state.quiz = { blanks: quizBlanks, idx: 0, results: [], startTime: Date.now(), finished: false };
+    renderQuizBlank();
+  } else {
+    // 学習モード(または穴が無く判定不可)
+    document.getElementById('btn-show-answer').hidden = false;
+  }
 
   // TTS auto
   stopTTS();
   if (state.ttsEnabled) speakNow(q.question);
-
-  // Update tts button state
   document.getElementById('btn-tts').textContent = state.ttsEnabled ? '🔇' : '🔊';
+}
+
+// 解答モード: 現在の穴の入力欄を表示
+function renderQuizBlank() {
+  const { blanks, idx } = state.quiz;
+  const b = blanks[idx];
+  document.getElementById('quiz-area').hidden = false;
+  const labelEl = document.getElementById('quiz-blank-label');
+  labelEl.innerHTML = blanks.length > 1
+    ? `<span class="qbl-num">${escapeHtml(b.label)}</span> の解答 <span class="qbl-count">(${idx + 1}/${blanks.length})</span>`
+    : `解答を入力`;
+  const input = document.getElementById('quiz-input');
+  input.value = '';
+  input.readOnly = false;
+  input.classList.remove('correct', 'incorrect');
+  document.getElementById('quiz-feedback').hidden = true;
+  document.getElementById('btn-quiz-judge').hidden = false;
+  document.getElementById('btn-quiz-next').hidden = true;
+  document.getElementById('btn-quiz-manual').hidden = true;
+  document.getElementById('rating-grid').hidden = true;
+  setTimeout(() => { try { input.focus(); } catch (e) {} }, 50);
+}
+
+// 解答モード: 現在の穴を判定
+function judgeQuizBlank() {
+  const { blanks, idx } = state.quiz;
+  const b = blanks[idx];
+  const input = document.getElementById('quiz-input');
+  const val = input.value;
+  const correct = judgeAnswer(val, b.answer);
+  state.quiz.results[idx] = correct;
+
+  input.readOnly = true;
+  input.classList.add(correct ? 'correct' : 'incorrect');
+
+  const fb = document.getElementById('quiz-feedback');
+  fb.hidden = false;
+  fb.className = 'quiz-feedback ' + (correct ? 'fb-correct' : 'fb-incorrect');
+  fb.innerHTML = correct
+    ? `<span class="fb-mark">✓</span> 正解`
+    : `<span class="fb-mark">✗</span> 不正解　<span class="fb-correct-ans">正解: ${escapeHtml(b.answer)}</span>`
+      + ` <button class="fb-override" id="fb-override">やっぱり正解だった</button>`;
+
+  // override(自己申告で正解に)
+  if (!correct) {
+    const ov = document.getElementById('fb-override');
+    if (ov) ov.addEventListener('click', () => {
+      state.quiz.results[idx] = true;
+      input.classList.remove('incorrect');
+      input.classList.add('correct');
+      fb.className = 'quiz-feedback fb-correct';
+      fb.innerHTML = `<span class="fb-mark">✓</span> 正解にしました`;
+    });
+  }
+
+  document.getElementById('btn-quiz-judge').hidden = true;
+  document.getElementById('btn-quiz-next').hidden = false;
+  const isLast = idx >= blanks.length - 1;
+  document.getElementById('btn-quiz-next').textContent = isLast ? '結果を見る' : '次の穴へ';
+
+  if (state.ttsEnabled) speakNow(b.answer);
+}
+
+// 解答モード: 次の穴 or 全完了で評価へ
+function nextQuizBlank() {
+  // 結果表示後の「次へ」: 自動評価を適用して次の問題へ
+  if (state.quiz.finished) {
+    state.quiz.finished = false;
+    rate(state.quiz.autoRating || 3);
+    return;
+  }
+  const { blanks } = state.quiz;
+  if (state.quiz.idx < blanks.length - 1) {
+    state.quiz.idx += 1;
+    renderQuizBlank();
+  } else {
+    finishQuizQuestion();
+  }
+}
+
+// 解答モード: 全穴判定後、結果サマリ+SM-2評価ボタン
+// 誤答数と解答時間からSM-2評価(1=もう一度/2=難しい/3=普通/4=簡単)を自動決定
+const QUIZ_FAST_SEC = 8;    // 1穴あたりこれ以下なら高速
+const QUIZ_SLOW_SEC = 25;   // 1穴あたりこれを超えると低速
+function autoRateQuiz(results, elapsedMs) {
+  const total = results.length || 1;
+  const wrong = results.filter(r => !r).length;
+  const errorRate = wrong / total;
+  const avgSec = (elapsedMs / 1000) / total;
+  if (errorRate >= 0.5) return 1;         // 半分以上誤り → もう一度
+  if (errorRate > 0) return 2;            // 一部誤り → 難しい
+  // 全問正解 → 速さで判定
+  if (avgSec <= QUIZ_FAST_SEC) return 4;  // 速い → 簡単
+  if (avgSec <= QUIZ_SLOW_SEC) return 3;  // 普通 → 普通
+  return 2;                               // 遅い(正解だが時間) → 難しい
+}
+
+function finishQuizQuestion() {
+  const { blanks, results, startTime } = state.quiz;
+  const correctCount = results.filter(Boolean).length;
+  const allCorrect = correctCount === blanks.length;
+  const elapsedMs = Date.now() - (startTime || Date.now());
+  const elapsedSec = Math.max(1, Math.round(elapsedMs / 1000));
+
+  const autoRating = autoRateQuiz(results, elapsedMs);
+  state.quiz.autoRating = autoRating;
+  state.quiz.finished = true;
+
+  // 解答を全文表示
+  const ansEl = document.getElementById('study-answer');
+  ansEl.hidden = false;
+
+  // quiz入力部は隠す
+  document.getElementById('quiz-area').hidden = true;
+  document.getElementById('btn-quiz-judge').hidden = true;
+
+  // 間隔プレビュー
+  const q = state.studyDeck[state.studyIdx];
+  const p = JSON.parse(JSON.stringify(state.progress[q.id] || newProgress(q.id)));
+  const ints = previewIntervals(p);
+  document.getElementById('int-1').textContent = fmtDays(ints[0]);
+  document.getElementById('int-2').textContent = fmtDays(ints[1]);
+  document.getElementById('int-3').textContent = fmtDays(ints[2]);
+  document.getElementById('int-4').textContent = fmtDays(ints[3]);
+
+  const ratingNames = { 1: 'もう一度', 2: '難しい', 3: '普通', 4: '簡単' };
+  const nextInt = fmtDays(ints[autoRating - 1]);
+
+  // サマリ + 自動評価表示
+  const head = blanks.length > 1
+    ? `${blanks.length}問中 ${correctCount}問正解`
+    : (allCorrect ? '正解' : '不正解');
+  const summary =
+    `<div class="quiz-summary ${allCorrect ? 'all-ok' : 'some-ng'}">${head} ・ ${elapsedSec}秒</div>` +
+    `<div class="quiz-autorate">自動評価 <strong class="rate-name r${autoRating}">${ratingNames[autoRating]}</strong>` +
+    `<span class="ar-next">次回 ${nextInt}</span></div>`;
+  ansEl.innerHTML = summary + renderAnswer(q.answer);
+
+  // 「次へ」(自動評価を適用して進む)を表示
+  const nextBtn = document.getElementById('btn-quiz-next');
+  nextBtn.hidden = false;
+  nextBtn.textContent = '次へ';
+
+  // 手動変更ボタン(任意): rating-gridは隠しておき、リンクで開く
+  const grid = document.getElementById('rating-grid');
+  grid.hidden = true;
+  grid.querySelectorAll('.rate').forEach(r => r.classList.remove('suggested'));
+  grid.querySelector('.rate' + ({1:'-again',2:'-hard',3:'-good',4:'-easy'}[autoRating])).classList.add('suggested');
+  document.getElementById('btn-quiz-manual').hidden = false;
 }
 
 function showAnswer() {
@@ -1231,14 +1493,13 @@ function csvEscape(v) {
 
 // 全問題をCSVで書き出す(id列つき)。これをExcelで編集して戻すのが基本フロー。
 async function exportCSV() {
-  const headers = ['id', 'category', 'question', 'answer', 'tags', 'source', 'year', 'importance', 'author'];
+  const headers = ['id', 'category', 'Q&A', 'tags', 'source', 'year', 'importance', 'author'];
   const lines = [headers.join(',')];
   for (const q of state.questions) {
     const row = [
       q.id,
       q.category || 'common',
-      q.question || '',
-      q.answer || '',
+      buildQACell(q.question, q.answer),
       (q.tags || []).join(';'),
       q.source || '',
       q.year || '',
@@ -1277,12 +1538,18 @@ async function importCSV(file) {
     const rows = parseDelim(clean, sep);
     if (rows.length < 2) throw new Error('行が足りません(ヘッダー+1行以上)');
     const headers = rows[0].map(h => h.trim().toLowerCase());
-    const idx = (name) => headers.indexOf(name);
+    const idx = (...names) => {
+      for (const n of names) { const i = headers.indexOf(n); if (i >= 0) return i; }
+      return -1;
+    };
     const iId = idx('id');
-    const iCat = idx('category'); const iQ = idx('question'); const iA = idx('answer');
+    const iCat = idx('category');
+    const iQA = idx('q&a', 'qa', 'q＆a', 'q_a', 'q and a');
+    const iQ = idx('question'); const iA = idx('answer');
     const iTags = idx('tags'); const iSrc = idx('source'); const iYear = idx('year');
     const iImp = idx('importance'); const iAuth = idx('author');
-    if (iQ < 0 || iA < 0) throw new Error('question / answer 列が必須です');
+    const useQA = iQA >= 0;
+    if (!useQA && (iQ < 0 || iA < 0)) throw new Error('Q&A 列、または question/answer 列が必要です');
 
     // 既存問題の照合用インデックス
     const byId = {};
@@ -1300,8 +1567,18 @@ async function importCSV(file) {
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i];
       if (!r) continue;
-      const qText = (r[iQ] || '').trim();
-      const aText = (r[iA] || '').trim();
+
+      // Q&A形式 or question/answer形式 から {question, answer} を得る
+      let qText, aText;
+      if (useQA) {
+        const parsed = parseQACell(r[iQA] || '');
+        if (!parsed || !parsed.question) continue;
+        qText = parsed.question;
+        aText = parsed.answer;
+      } else {
+        qText = (r[iQ] || '').trim();
+        aText = (r[iA] || '').trim();
+      }
       if (!qText || !aText) continue;  // 必須欠落行はスキップ
 
       const cat = (iCat >= 0 ? (r[iCat] || '') : 'common').trim().toLowerCase();
@@ -1473,6 +1750,13 @@ function bindEvents() {
       renderHome();
     });
   });
+  // Study style (学習/解答)
+  document.querySelectorAll('.opt[data-style]').forEach(o => {
+    o.addEventListener('click', () => {
+      state.studyStyle = o.dataset.style;
+      document.querySelectorAll('.opt[data-style]').forEach(x => x.classList.toggle('active', x === o));
+    });
+  });
   // Action buttons
   document.getElementById('btn-review').addEventListener('click', () => startStudy('review'));
   document.getElementById('btn-new').addEventListener('click', () => startStudy('new'));
@@ -1497,6 +1781,23 @@ function bindEvents() {
 
   // Study controls
   document.getElementById('btn-show-answer').addEventListener('click', showAnswer);
+  document.getElementById('btn-quiz-judge').addEventListener('click', judgeQuizBlank);
+  document.getElementById('btn-quiz-next').addEventListener('click', nextQuizBlank);
+  document.getElementById('btn-quiz-manual').addEventListener('click', () => {
+    // 手動評価に切替: 自動の「次へ」を消し、4段階ボタンを表示
+    document.getElementById('rating-grid').hidden = false;
+    document.getElementById('btn-quiz-next').hidden = true;
+    document.getElementById('btn-quiz-manual').hidden = true;
+    state.quiz.finished = false;  // 手動選択に委ねる
+  });
+  document.getElementById('quiz-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // 判定前ならEnterで判定、判定後ならEnterで次へ
+      if (!document.getElementById('btn-quiz-judge').hidden) judgeQuizBlank();
+      else if (!document.getElementById('btn-quiz-next').hidden) nextQuizBlank();
+    }
+  });
   document.querySelectorAll('.rate').forEach(r => {
     r.addEventListener('click', () => rate(Number(r.dataset.rating)));
   });

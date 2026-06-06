@@ -780,6 +780,155 @@ input:focus, textarea:focus, select:focus {
   font-feature-settings: "tnum" 1;
   font-weight: 500;
 }
+/* 正答状況に応じた推奨評価ボタンの強調 */
+.rate.suggested {
+  outline: 2.5px solid var(--text);
+  outline-offset: 2px;
+  animation: ratePulse 1.4s ease-in-out infinite;
+}
+@keyframes ratePulse {
+  0%, 100% { outline-color: color-mix(in srgb, var(--text) 30%, transparent); }
+  50% { outline-color: var(--text); }
+}
+
+/* ===== Quiz mode (解答モード) ===== */
+.quiz-area {
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px dashed var(--border);
+  animation: answerFade 0.3s var(--ease-out);
+}
+.quiz-blank-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 10px;
+  letter-spacing: 0.02em;
+}
+.quiz-blank-label .qbl-num {
+  display: inline-block;
+  min-width: 1.8em;
+  text-align: center;
+  padding: 1px 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 6px;
+  font-weight: 700;
+  margin-right: 2px;
+}
+.quiz-blank-label .qbl-count {
+  color: var(--text-faint);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.quiz-input {
+  font-size: calc(17px * var(--font-q-mult));
+  padding: 15px 16px;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  transition: border-color 0.2s var(--ease-out), box-shadow 0.2s;
+}
+.quiz-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-soft);
+}
+.quiz-input.correct {
+  border-color: var(--good);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--good) 14%, transparent);
+}
+.quiz-input.incorrect {
+  border-color: var(--again);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--again) 14%, transparent);
+}
+.quiz-feedback {
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  animation: answerFade 0.25s var(--ease-out);
+}
+.quiz-feedback .fb-mark {
+  font-weight: 800;
+  font-size: 1.15em;
+  margin-right: 4px;
+}
+.quiz-feedback.fb-correct { color: var(--good); font-weight: 600; }
+.quiz-feedback.fb-incorrect { color: var(--again); font-weight: 600; }
+.quiz-feedback .fb-correct-ans {
+  display: inline-block;
+  color: var(--text);
+  font-weight: 500;
+  background: var(--bg-soft);
+  padding: 2px 10px;
+  border-radius: 6px;
+  margin-left: 2px;
+}
+.quiz-feedback .fb-override {
+  display: inline-block;
+  margin-left: 6px;
+  margin-top: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+}
+.quiz-feedback .fb-override:active { background: var(--bg-soft); }
+.quiz-summary {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 14px;
+  padding: 8px 14px;
+  border-radius: var(--r-md);
+  display: inline-block;
+}
+.quiz-summary.all-ok { background: color-mix(in srgb, var(--good) 18%, var(--bg-1)); color: var(--good); }
+.quiz-summary.some-ng { background: color-mix(in srgb, var(--again) 16%, var(--bg-1)); color: var(--again); }
+
+/* 自動評価バナー */
+.quiz-autorate {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.quiz-autorate .rate-name {
+  font-size: 16px;
+  font-weight: 700;
+  padding: 3px 12px;
+  border-radius: 999px;
+}
+.quiz-autorate .rate-name.r1 { background: color-mix(in srgb, var(--again) 20%, var(--bg-1)); color: var(--again); }
+.quiz-autorate .rate-name.r2 { background: color-mix(in srgb, var(--hard) 20%, var(--bg-1)); color: var(--hard); }
+.quiz-autorate .rate-name.r3 { background: color-mix(in srgb, var(--good) 20%, var(--bg-1)); color: var(--good); }
+.quiz-autorate .rate-name.r4 { background: color-mix(in srgb, var(--easy) 20%, var(--bg-1)); color: var(--easy); }
+.quiz-autorate .ar-next {
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.btn-quiz-manual {
+  width: 100%;
+  margin-top: 8px;
+  padding: 11px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.btn-quiz-manual:active { color: var(--text); }
+
+/* 学習スタイルトグルは data-style 用に既存 .opt を流用 */
+.opt[data-style].active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
 
 /* ===== Done view ===== */
 .done-content {
