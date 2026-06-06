@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '1.5.0';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '1.6.0';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -1215,47 +1215,179 @@ async function importJSON(file, full) {
   }
 }
 
+// 問題文の正規化キー(id列が無いときのフォールバック照合用)
+function qKey(text) {
+  return (text || '').replace(/\s+/g, '').trim();
+}
+
+// CSVセルのエスケープ
+function csvEscape(v) {
+  const s = String(v == null ? '' : v);
+  if (/[",\r\n]/.test(s)) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+// 全問題をCSVで書き出す(id列つき)。これをExcelで編集して戻すのが基本フロー。
+async function exportCSV() {
+  const headers = ['id', 'category', 'question', 'answer', 'tags', 'source', 'year', 'importance', 'author'];
+  const lines = [headers.join(',')];
+  for (const q of state.questions) {
+    const row = [
+      q.id,
+      q.category || 'common',
+      q.question || '',
+      q.answer || '',
+      (q.tags || []).join(';'),
+      q.source || '',
+      q.year || '',
+      q.importance || '',
+      q.author || '',
+    ].map(csvEscape).join(',');
+    lines.push(row);
+  }
+  const csv = lines.join('\r\n');
+  // BOM付きでExcelがUTF-8と認識できるように
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `questions-${dateKey()}.csv`;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+  toast(`${state.questions.length}問をCSVに書き出しました`);
+}
+
+// CSVを正本としてアプリを完全同期する(追加・更新・削除をすべて反映)。
+// - id列で既存問題を照合(id無い行は問題文で照合、それも無ければ新規)
+// - 問題文/解答が変わった行 → 進捗リセット(新規扱い)
+// - メタのみ変更 → 進捗保持
+// - CSVに無い既存問題 → 削除(進捗は孤立して残る)
+// - progressストアは直接触らない(リセット対象のみ削除)
 async function importCSV(file) {
-  // CSV format (header row required, tab or comma):
+  // ヘッダー行必須(タブ区切りも可):
   //   必須: category, question, answer
-  //   任意: tags, source, year, importance, author
+  //   任意: id, tags, source, year, importance, author
   try {
     const text = await file.text();
-    const sep = text.indexOf('\t') >= 0 && text.indexOf('\t') < text.indexOf('\n') ? '\t' : ',';
-    const rows = parseDelim(text, sep);
-    if (rows.length < 2) throw new Error('行が足りません');
+    // BOM除去
+    const clean = text.replace(/^\ufeff/, '');
+    const firstLine = clean.slice(0, clean.indexOf('\n') >= 0 ? clean.indexOf('\n') : clean.length);
+    const sep = firstLine.indexOf('\t') >= 0 ? '\t' : ',';
+    const rows = parseDelim(clean, sep);
+    if (rows.length < 2) throw new Error('行が足りません(ヘッダー+1行以上)');
     const headers = rows[0].map(h => h.trim().toLowerCase());
     const idx = (name) => headers.indexOf(name);
+    const iId = idx('id');
     const iCat = idx('category'); const iQ = idx('question'); const iA = idx('answer');
     const iTags = idx('tags'); const iSrc = idx('source'); const iYear = idx('year');
     const iImp = idx('importance'); const iAuth = idx('author');
     if (iQ < 0 || iA < 0) throw new Error('question / answer 列が必須です');
-    let n = 0;
+
+    // 既存問題の照合用インデックス
+    const byId = {};
+    const byQ = {};
+    for (const q of state.questions) {
+      byId[q.id] = q;
+      const k = qKey(q.question);
+      if (!(k in byQ)) byQ[k] = q;
+    }
+
+    const now = new Date().toISOString();
+    const incoming = [];
+    const usedIds = new Set();
+
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i];
-      if (!r || !r[iQ] || !r[iA]) continue;
-      const cat = (iCat >= 0 ? r[iCat] : 'common').trim().toLowerCase();
+      if (!r) continue;
+      const qText = (r[iQ] || '').trim();
+      const aText = (r[iA] || '').trim();
+      if (!qText || !aText) continue;  // 必須欠落行はスキップ
+
+      const cat = (iCat >= 0 ? (r[iCat] || '') : 'common').trim().toLowerCase();
       const catNorm = ['common','solution','engineering'].includes(cat) ? cat
         : (cat.includes('共') ? 'common' : (cat.includes('ソリュ') ? 'solution' : (cat.includes('エンジ') ? 'engineering' : 'common')));
+
+      // id照合 → 無ければ問題文照合 → それも無ければ新規
+      let id = iId >= 0 ? (r[iId] || '').trim() : '';
+      let matched = null;
+      if (id && byId[id]) {
+        matched = byId[id];
+      } else if (!id) {
+        const cand = byQ[qKey(qText)];
+        if (cand && !usedIds.has(cand.id)) { matched = cand; id = cand.id; }
+      }
+      if (!id) id = uid();
+      if (usedIds.has(id)) id = uid();  // 同一id重複行を避ける
+      usedIds.add(id);
+
       const q = {
-        id: uid(),
+        id,
         category: catNorm,
-        question: r[iQ].trim(),
-        answer: r[iA].trim(),
-        tags: iTags >= 0 ? (r[iTags] || '').split(/[,、|;]/).map(s => s.trim()).filter(Boolean) : [],
-        source: iSrc >= 0 ? (r[iSrc] || '').trim() : '',
-        year: iYear >= 0 && r[iYear] ? Number(r[iYear].trim()) : null,
-        importance: iImp >= 0 && r[iImp] ? Math.max(1, Math.min(5, Number(r[iImp]))) : 3,
-        author: iAuth >= 0 ? (r[iAuth] || '').trim() : (state.settings.authorName || ''),
-        createdAt: new Date().toISOString(),
-        modifiedAt: new Date().toISOString(),
+        question: qText,
+        answer: aText,
+        tags: iTags >= 0 ? (r[iTags] || '').split(/[,、|;]/).map(s => s.trim()).filter(Boolean) : (matched ? matched.tags : []),
+        source: iSrc >= 0 ? (r[iSrc] || '').trim() : (matched ? matched.source : ''),
+        year: iYear >= 0 && r[iYear] ? Number(String(r[iYear]).trim()) : (matched ? matched.year : null),
+        importance: iImp >= 0 && r[iImp] ? Math.max(1, Math.min(5, Number(r[iImp]))) : (matched ? (matched.importance || 3) : 3),
+        author: iAuth >= 0 ? (r[iAuth] || '').trim() : (matched ? (matched.author || '') : (state.settings.authorName || '')),
+        createdAt: matched ? (matched.createdAt || now) : now,
+        modifiedAt: now,
       };
       q.contentHash = contentHash(q);
+      q._matched = matched;
+      incoming.push(q);
+    }
+
+    if (incoming.length === 0) throw new Error('有効な問題行がありません');
+
+    // 差分計算
+    let added = 0, metaOrSame = 0;
+    const resetIds = [];
+    const incomingIds = new Set(incoming.map(q => q.id));
+    for (const q of incoming) {
+      if (!q._matched) { added++; }
+      else {
+        const oldHash = q._matched.contentHash || contentHash(q._matched);
+        if (oldHash !== q.contentHash) {
+          if (state.progress[q.id]) resetIds.push(q.id);
+        } else {
+          metaOrSame++;
+        }
+      }
+    }
+    let removed = 0;
+    for (const q of state.questions) {
+      if (!incomingIds.has(q.id)) removed++;
+    }
+
+    const ok = await confirm(
+      `CSVの内容でアプリを同期します。\n\n` +
+      `合計 ${incoming.length}問になります\n` +
+      `・新規追加: ${added}件\n` +
+      `・内容変更で新規扱い(履歴リセット): ${resetIds.length}件\n` +
+      `・削除: ${removed}件\n\n` +
+      `内容を変えていない問題の学習履歴は保持されます。\n` +
+      `続けますか?`
+    );
+    if (!ok) return;
+
+    // 問題バンクを全置換
+    await dbClear(STORE_Q);
+    state.questions = [];
+    for (const q of incoming) {
+      delete q._matched;
       state.questions.push(q);
       await dbPut(STORE_Q, q);
-      n++;
     }
-    toast(`CSVから ${n} 件取り込みました`);
+    // 内容変更分の進捗リセット
+    for (const id of resetIds) {
+      await dbDel(STORE_P, id);
+      delete state.progress[id];
+    }
+
+    const kept = Object.keys(state.progress).filter(qid => incomingIds.has(qid)).length;
+    toast(`✓ CSV同期完了: 全${incoming.length}問 / 履歴保持${kept}件 / リセット${resetIds.length}件`);
     renderHome(); renderList(); renderStats();
   } catch (e) {
     console.error(e);
@@ -1428,19 +1560,19 @@ function bindEvents() {
 
   // Settings: import/export
   document.getElementById('btn-export-all').addEventListener('click', exportAll);
-  document.getElementById('btn-export-questions').addEventListener('click', exportQuestionsOnly);
 
-  // PC -> phone sync (replace question bank, preserve progress)
-  document.getElementById('btn-import-replace').addEventListener('click', () => {
-    document.getElementById('file-import-replace').click();
+  // CSV: question management (source of truth). Export (with id) and full-sync import.
+  document.getElementById('btn-export-csv').addEventListener('click', exportCSV);
+  document.getElementById('btn-import-csv').addEventListener('click', () => {
+    document.getElementById('file-import-csv').click();
   });
-  document.getElementById('file-import-replace').addEventListener('change', async (e) => {
+  document.getElementById('file-import-csv').addEventListener('change', async (e) => {
     const f = e.target.files[0]; if (!f) return;
-    await importQuestionsReplace(f);
+    await importCSV(f);
     e.target.value = '';
   });
 
-  // Full restore (overwrite progress too)
+  // Full restore (overwrite progress too) - restore from backup
   document.getElementById('btn-import-full').addEventListener('click', () => {
     document.getElementById('file-import').dataset.full = '1';
     document.getElementById('file-import').click();
@@ -1453,14 +1585,6 @@ function bindEvents() {
       if (!ok) { e.target.value = ''; return; }
     }
     await importJSON(f, full);
-    e.target.value = '';
-  });
-  document.getElementById('btn-import-csv').addEventListener('click', () => {
-    document.getElementById('file-import-csv').click();
-  });
-  document.getElementById('file-import-csv').addEventListener('change', async (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    await importCSV(f);
     e.target.value = '';
   });
 
