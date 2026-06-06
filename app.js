@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '1.8.0';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '1.8.1';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -103,6 +103,25 @@ async function dbGet(store, key) { return reqP(tx(store).get(key)); }
 async function dbPut(store, value) { return reqP(tx(store, 'readwrite').put(value)); }
 async function dbDel(store, key) { return reqP(tx(store, 'readwrite').delete(key)); }
 async function dbClear(store) { return reqP(tx(store, 'readwrite').clear()); }
+
+// 1トランザクションでストアをクリアして一括書き込む。
+// dbClear + ループdbPut の代わりにこれを使うことで、
+// iOS Safariで「The database connection is closing」を防ぐ。
+// delIds: 個別に削除するキーの配列(progress リセット用)
+async function dbReplaceAll(store, records, delIds = []) {
+  return new Promise((resolve, reject) => {
+    const t = db.transaction([store, STORE_P], 'readwrite');
+    t.onerror = () => reject(t.error);
+    t.oncomplete = resolve;
+    const s = t.objectStore(store);
+    s.clear();
+    for (const rec of records) s.put(rec);
+    if (delIds.length > 0) {
+      const ps = t.objectStore(STORE_P);
+      for (const id of delIds) ps.delete(id);
+    }
+  });
+}
 
 async function metaSet(key, value) { return dbPut(STORE_M, { key, value }); }
 async function metaGet(key) { const r = await dbGet(STORE_M, key); return r ? r.value : null; }
@@ -1385,28 +1404,20 @@ async function importQuestionsReplace(file) {
     );
     if (!ok) return;
 
-    // 問題バンクを全置換
-    await dbClear(STORE_Q);
-    state.questions = [];
+    // 問題バンクを全置換(1トランザクションでclear + 全put + 進捗リセット)
     for (const q of incoming) {
       if (!q.id) q.id = uid();
       if (!q.category) q.category = 'common';
       if (!q.contentHash) q.contentHash = contentHash(q);
       if (!q.createdAt) q.createdAt = new Date().toISOString();
       if (!q.modifiedAt) q.modifiedAt = q.createdAt;
-      state.questions.push(q);
-      await dbPut(STORE_Q, q);
     }
-
-    // 内容が変わった問題の進捗をリセット(新規問題として扱う)
-    for (const id of resetIds) {
-      await dbDel(STORE_P, id);
-      delete state.progress[id];
-    }
-    // ※内容が同じ問題の進捗はそのまま保持。削除済み問題の進捗レコードは無害に残る。
+    await dbReplaceAll(STORE_Q, incoming, resetIds);
+    state.questions = [...incoming];
+    for (const id of resetIds) delete state.progress[id];
 
     const kept = Object.keys(state.progress).filter(qid => incomingIds.has(qid)).length;
-    toast(`✓ 同期完了: 全${count}問 / 履歴保持${kept}件 / リセット${resetIds.length}件`);
+    toast(`✓ 同期完了: 全${incoming.length}問 / 履歴保持${kept}件 / リセット${resetIds.length}件`);
     renderHome(); renderList(); renderStats();
   } catch (e) {
     console.error(e);
@@ -1649,19 +1660,11 @@ async function importCSV(file) {
     );
     if (!ok) return;
 
-    // 問題バンクを全置換
-    await dbClear(STORE_Q);
-    state.questions = [];
-    for (const q of incoming) {
-      delete q._matched;
-      state.questions.push(q);
-      await dbPut(STORE_Q, q);
-    }
-    // 内容変更分の進捗リセット
-    for (const id of resetIds) {
-      await dbDel(STORE_P, id);
-      delete state.progress[id];
-    }
+    // 問題バンクを全置換(1トランザクションでclear + 全put + 進捗リセット)
+    incoming.forEach(q => delete q._matched);
+    await dbReplaceAll(STORE_Q, incoming, resetIds);
+    state.questions = [...incoming];
+    for (const id of resetIds) delete state.progress[id];
 
     const kept = Object.keys(state.progress).filter(qid => incomingIds.has(qid)).length;
     toast(`✓ CSV同期完了: 全${incoming.length}問 / 履歴保持${kept}件 / リセット${resetIds.length}件`);
@@ -1703,15 +1706,18 @@ async function resetProgress() {
 }
 
 async function resetAll() {
-  await dbClear(STORE_Q);
-  await dbClear(STORE_P);
-  await dbClear(STORE_S);
-  await dbClear(STORE_M);
+  // 全ストアを1トランザクションでクリア
+  await new Promise((resolve, reject) => {
+    const t = db.transaction([STORE_Q, STORE_P, STORE_S, STORE_M], 'readwrite');
+    t.onerror = () => reject(t.error);
+    t.oncomplete = resolve;
+    [STORE_Q, STORE_P, STORE_S, STORE_M].forEach(s => t.objectStore(s).clear());
+  });
   state.questions = [];
   state.progress = {};
   state.settings = {
-    examDate: '2026-08-31', newPerDay: 10, revPerDay: 100,
-    mixRatio: '3:7', theme: 'auto', fontSize: 'm', ttsAuto: false,
+    examDate: '', newPerDay: 10, revPerDay: 100,
+    mixRatio: '3:7', theme: 'auto', fontSize: 'm', ttsAuto: false, authorName: '',
   };
   await saveSettings();
   state.todaySeen = { new: 0, rev: 0 };
