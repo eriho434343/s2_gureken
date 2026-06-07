@@ -85,12 +85,6 @@
       </div>
 
       <div class="session-options">
-        <span class="opt-label">学習スタイル</span>
-        <button class="opt active" data-style="study">学習(見るだけ)</button>
-        <button class="opt" data-style="quiz">解答(入力)</button>
-      </div>
-
-      <div class="session-options">
         <span class="opt-label">セッション長</span>
         <button class="opt active" data-size="10">10問</button>
         <button class="opt" data-size="20">20問</button>
@@ -139,7 +133,7 @@
     </div>
 
     <div class="study-actions">
-      <button class="btn-show-answer" id="btn-show-answer">答えを見る</button>
+      <button class="btn-show-answer" id="btn-show-answer" hidden>答えを見る</button>
       <!-- 解答モードのボタン -->
       <button class="btn-show-answer" id="btn-quiz-judge" hidden>判定する</button>
       <button class="btn-show-answer" id="btn-quiz-next" hidden>次へ</button>
@@ -247,19 +241,19 @@
       </label>
       <label class="field">
         <span class="field-label">問題 <span class="req">必須</span> (穴埋めは【】または【①】【②】で囲む)</span>
-        <textarea id="ed-q" rows="4" placeholder="例: ROIC【①】%以上、ROE【②】%以上" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+        <textarea id="ed-q" rows="4" placeholder="例: 【売上総利益】は売上高から売上原価を引いた利益" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
       </label>
       <label class="field">
         <span class="field-label">解答 <span class="req">必須</span></span>
-        <textarea id="ed-a" rows="6" placeholder="例: ① 3.3　② 8.0" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+        <textarea id="ed-a" rows="6" placeholder="例: 売上総利益 (穴が複数なら ① 〜　② 〜)" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
       </label>
       <label class="field">
         <span class="field-label">タグ <span class="opt">任意</span> (カンマ区切り)</span>
-        <input id="ed-tags" type="text" placeholder="経営計画2026, 財務目標" autocomplete="off">
+        <input id="ed-tags" type="text" placeholder="財務, 用語" autocomplete="off">
       </label>
       <label class="field">
         <span class="field-label">出典 <span class="opt">任意</span></span>
-        <input id="ed-source" type="text" placeholder="関西電力グループ経営計画2026 p.2" autocomplete="off">
+        <input id="ed-source" type="text" placeholder="社内資料 p.2" autocomplete="off">
       </label>
       <div class="row-pair">
         <label class="field">
@@ -459,7 +453,7 @@
       <div class="settings-section about">
         <h3>このアプリ</h3>
         <p>SM-2間隔反復・アクティブリコール・インターリービング・穴埋め式を採用。完全オフライン動作・無料。</p>
-        <p class="hint">v1.8 / Build 2026.05 (CSV-Q&A形式・自動評価)</p>
+        <p class="hint">v2.0 / Build 2026.06 (穴=解答内容で履歴追従・解答モードのみ)</p>
       </div>
     </div>
   </section>

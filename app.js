@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '1.8.1';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '2.0.0';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -42,8 +42,7 @@ const state = {
   studyStats: { again: 0, hard: 0, good: 0, easy: 0, total: 0 },
   selectedCat: 'all',
   selectedSize: 10,
-  studyStyle: 'study',    // 'study'(見るだけ) | 'quiz'(入力判定)
-  quiz: { blanks: [], idx: 0, results: [] },  // 解答モードの進行状態
+  quiz: { active: [], idx: 0, results: [] },  // 解答モードの進行状態
   listCat: 'all',
   listStatus: 'all',
   listSort: 'created',
@@ -129,9 +128,53 @@ async function metaGet(key) { const r = await dbGet(STORE_M, key); return r ? r.
 // ============================================
 // SM-2 algorithm
 // ============================================
-function newProgress(qid) {
+// 習得(マスター)の条件: 連続で速く正解した回数がこの値に達したら、その穴は卒業(以後出題しない)
+const MASTER_STREAK = 3;
+const BLANK_FAST_SEC = 8;   // 1穴あたりこの秒数以内なら「速い」
+const BLANK_SLOW_SEC = 25;  // これを超えると「遅い」
+
+// 文字列ハッシュ(djb2)
+function hashStr(s) {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+// 穴ごとの進捗キー: 問題id + '#' + 解答内容のハッシュ。
+// 位置や問題文が変わっても、解答の中身が同じなら同じキー = 学習履歴が追従する。
+function blankKey(qid, answer) { return qid + '#' + hashStr(normalizeAns(answer)); }
+
+// 問題の穴一覧 [{label, answer}]。穴が無い場合は解答全体を1穴とみなす。
+function getBlanks(q) {
+  const b = parseQuizBlanks(q.question, q.answer);
+  if (b && b.length) return b;
+  return [{ label: '', answer: (q.answer || '').trim() }];
+}
+// 各穴の状態を返す: [{i,label,answer,key,prog,st}] st='new'|'due'|'wait'|'mastered'
+// 同一問題内に同じ解答が複数あれば ~1, ~2 を付けて区別する。
+function getBlankStates(q) {
+  const today = startOfDay();
+  const blanks = getBlanks(q);
+  const seen = {};
+  return blanks.map((b, i) => {
+    const base = blankKey(q.id, b.answer);
+    const n = seen[base] || 0; seen[base] = n + 1;
+    const key = n === 0 ? base : base + '~' + n;
+    const bp = state.progress[key];
+    let st;
+    if (bp && bp.mastered) st = 'mastered';
+    else if (!bp || !bp.due) st = 'new';
+    else st = startOfDay(new Date(bp.due)) <= today ? 'due' : 'wait';
+    return { i, label: b.label, answer: b.answer, key, prog: bp || null, st };
+  });
+}
+// 今学習すべき穴(new または due)
+function qActiveBlanks(q) {
+  return getBlankStates(q).filter(s => s.st === 'new' || s.st === 'due');
+}
+
+function newProgress(key) {
   return {
-    questionId: qid,
+    questionId: key,    // 穴ごとの場合は blankKey(qid, answer)
     ease: 2.5,
     interval: 0,
     reps: 0,
@@ -139,6 +182,8 @@ function newProgress(qid) {
     due: null,        // null = new (never reviewed)
     lastReviewed: null,
     totalReviews: 0,
+    fastStreak: 0,    // 連続高速正解の回数
+    mastered: false,  // 習得済み(卒業)
     history: [],
   };
 }
@@ -347,11 +392,18 @@ function shuffle(arr) {
   return a;
 }
 function cardStatus(q, p) {
-  if (!p || !p.due) return 'new';
-  if (p.lapses >= 4 && p.interval < 7) return 'leech';
-  if (p.interval >= 21) return 'mastered';
-  if (p.reps >= 2) return 'review';
-  return 'learning';
+  const states = getBlankStates(q);
+  if (states.length && states.every(s => s.st === 'mastered')) return 'mastered';
+  if (states.some(s => s.prog && s.prog.lapses >= 4 && s.prog.interval < 7 && !s.prog.mastered)) return 'leech';
+  const studied = states.some(s => s.prog);
+  if (states.some(s => s.st === 'new')) return studied ? 'learning' : 'new';
+  return 'review';
+}
+// 習得済み穴数 / 全穴数
+function masteryRatio(q) {
+  const states = getBlankStates(q);
+  const m = states.filter(s => s.st === 'mastered').length;
+  return { mastered: m, total: states.length };
 }
 
 // ============================================
@@ -374,6 +426,9 @@ async function init() {
     await loadSeed(false);
   }
 
+  // 旧 per-question 進捗 → 穴ごと進捗へマイグレーション(履歴を保持)
+  await migrateProgressToPerBlank();
+
   // Reset today's counters if new day
   await resetTodayIfNeeded();
 
@@ -389,6 +444,92 @@ async function init() {
   // Hide loader
   document.getElementById('loader').remove();
   document.getElementById('app').hidden = false;
+}
+
+// 全問題について、現在有効な穴キー集合に含まれない進捗レコードを一括削除。
+// (解answ変更・穴削除・問題削除で不要になった古い進捗を掃除)
+async function pruneAllOrphanProgress() {
+  const valid = new Set();
+  for (const q of state.questions) {
+    for (const s of getBlankStates(q)) valid.add(s.key);
+  }
+  const delKeys = Object.keys(state.progress).filter(k => !valid.has(k));
+  if (delKeys.length === 0) return;
+  for (const k of delKeys) delete state.progress[k];
+  await new Promise((resolve, reject) => {
+    const t = db.transaction(STORE_P, 'readwrite');
+    t.onerror = () => reject(t.error);
+    t.oncomplete = resolve;
+    const s = t.objectStore(STORE_P);
+    for (const k of delKeys) s.delete(k);
+  });
+}
+
+// 指定問題の「今の穴キー集合」に含まれない、その問題ぶらさがりの進捗を削除。
+// 解答が変わった/削除された穴の古い進捗を掃除し、残った穴の履歴は保持する。
+async function pruneOrphanBlankProgress(q) {
+  const valid = new Set(getBlankStates(q).map(s => s.key));
+  const prefix = q.id + '#';
+  for (const k of Object.keys(state.progress)) {
+    if (k === q.id || (k.startsWith(prefix) && !valid.has(k))) {
+      await dbDel(STORE_P, k);
+      delete state.progress[k];
+    }
+  }
+}
+
+// 旧形式の進捗を新形式(解答内容ベースの穴キー)へ移行。履歴を保持する。
+//  - "id"(問題ごと)        → 各穴へ複製
+//  - "id#0","id#1"(位置ベース) → 解答内容ベースのキーへ付け替え
+async function migrateProgressToPerBlank() {
+  const allKeys = Object.keys(state.progress);
+  const qById = {};
+  for (const q of state.questions) qById[q.id] = q;
+
+  const toAdd = [];
+  const toDel = [];
+
+  const copyInto = (np, old) => {
+    np.ease = old.ease; np.interval = old.interval; np.reps = old.reps;
+    np.lapses = old.lapses; np.due = old.due; np.lastReviewed = old.lastReviewed;
+    np.totalReviews = old.totalReviews; np.history = old.history || [];
+    np.mastered = old.mastered != null ? old.mastered : (old.interval >= 21);
+    np.fastStreak = old.fastStreak != null ? old.fastStreak : (np.mastered ? MASTER_STREAK : 0);
+  };
+
+  for (const key of allKeys) {
+    const hashPos = key.indexOf('#');
+    if (hashPos < 0) {
+      // 旧·問題ごと進捗 → 全穴へ複製
+      const q = qById[key];
+      if (!q) continue;
+      for (const s of getBlankStates(q)) {
+        if (state.progress[s.key]) continue;
+        const np = newProgress(s.key); copyInto(np, state.progress[key]);
+        toAdd.push(np);
+      }
+      toDel.push(key);
+    } else {
+      // 既に '#' を含む = 穴キー。位置ベース(id#数字)なら解答ベースへ付け替え。
+      const suffix = key.slice(hashPos + 1);
+      if (/^\d+$/.test(suffix)) {
+        const qid = key.slice(0, hashPos);
+        const q = qById[qid];
+        if (!q) { toDel.push(key); continue; }
+        const states = getBlankStates(q);
+        const idx = Number(suffix);
+        const st = states[idx];
+        if (st && !state.progress[st.key]) {
+          const np = newProgress(st.key); copyInto(np, state.progress[key]);
+          toAdd.push(np);
+        }
+        toDel.push(key);
+      }
+      // それ以外(既に解答ベース)はそのまま
+    }
+  }
+  for (const np of toAdd) { state.progress[np.questionId] = np; await dbPut(STORE_P, np); }
+  for (const key of toDel) { delete state.progress[key]; await dbDel(STORE_P, key); }
 }
 
 // アプリバージョン管理: 更新検出と履歴保護通知
@@ -515,17 +656,14 @@ function showView(name) {
 // HOME view
 // ============================================
 function getDeckCounts(catFilter) {
-  const today = startOfDay();
   let due = 0, newq = 0;
   for (const q of state.questions) {
     if (catFilter !== 'all' && q.category !== catFilter) continue;
-    const p = state.progress[q.id];
-    if (!p || !p.due) {
-      newq++;
-    } else {
-      const dueD = startOfDay(new Date(p.due));
-      if (dueD <= today) due++;
-    }
+    const states = getBlankStates(q);
+    const hasDue = states.some(s => s.st === 'due');
+    const hasNew = states.some(s => s.st === 'new');
+    if (hasDue) due++;
+    else if (hasNew) newq++;
   }
   return { due, newq };
 }
@@ -534,9 +672,8 @@ function getWrongCount(catFilter) {
   let n = 0;
   for (const q of state.questions) {
     if (catFilter !== 'all' && q.category !== catFilter) continue;
-    const p = state.progress[q.id];
-    if (!p) continue;
-    if (p.lapses >= 1 && p.interval < 14) n++;
+    const states = getBlankStates(q);
+    if (states.some(s => s.prog && !s.prog.mastered && s.prog.lapses >= 1 && s.prog.interval < 14)) n++;
   }
   return n;
 }
@@ -639,23 +776,28 @@ function buildDeck(mode) {
   const newList = [];
   const wrongList = [];
 
+  // 各問題の穴状態で分類: dueな穴があれば復習、無くてnewな穴があれば新規
+  const earliestDue = {};  // ソート用: 問題内で最も早いdue穴の期日
   for (const q of state.questions) {
     if (!filterCat(q)) continue;
-    const p = state.progress[q.id];
-    if (!p || !p.due) {
+    const states = getBlankStates(q);
+    const hasDue = states.some(s => s.st === 'due');
+    const hasNew = states.some(s => s.st === 'new');
+    const hasWrong = states.some(s => s.prog && !s.prog.mastered && s.prog.lapses >= 1 && s.prog.interval < 14);
+    if (hasDue) {
+      dueList.push(q);
+      const dues = states.filter(s => s.st === 'due' && s.prog).map(s => new Date(s.prog.due).getTime());
+      earliestDue[q.id] = dues.length ? Math.min(...dues) : 0;
+    } else if (hasNew) {
       newList.push(q);
-    } else {
-      const dueD = startOfDay(new Date(p.due));
-      if (dueD <= today) dueList.push(q);
-      if (p.lapses >= 1 && p.interval < 14) wrongList.push(q);
     }
+    if (hasWrong) wrongList.push(q);
   }
 
-  // Sort due by oldest due first (most overdue), then by importance desc
+  // Sort due by oldest due first, then importance desc
   dueList.sort((a, b) => {
-    const da = new Date(state.progress[a.id].due);
-    const db = new Date(state.progress[b.id].due);
-    if (da - db !== 0) return da - db;
+    const d = (earliestDue[a.id] || 0) - (earliestDue[b.id] || 0);
+    if (d !== 0) return d;
     return (b.importance || 3) - (a.importance || 3);
   });
   // Sort new by importance desc, then created
@@ -664,7 +806,9 @@ function buildDeck(mode) {
     if (ai !== 0) return ai;
     return (a.createdAt || '').localeCompare(b.createdAt || '');
   });
-  wrongList.sort((a,b) => (state.progress[b.id].lapses || 0) - (state.progress[a.id].lapses || 0));
+  // Sort wrong by total lapses across blanks desc
+  const totalLapses = (q) => getBlankStates(q).reduce((s, x) => s + (x.prog ? x.prog.lapses : 0), 0);
+  wrongList.sort((a, b) => totalLapses(b) - totalLapses(a));
 
   let deck = [];
   if (mode === 'review') {
@@ -727,7 +871,6 @@ function renderStudy() {
   document.getElementById('progress-text').textContent = `${idx + 1} / ${total}`;
 
   const q = state.studyDeck[idx];
-  const p = state.progress[q.id] || newProgress(q.id);
 
   // Meta
   const meta = [];
@@ -755,14 +898,27 @@ function renderStudy() {
   document.getElementById('quiz-area').hidden = true;
   document.getElementById('quiz-feedback').hidden = true;
 
-  // 解答モード: 穴をパースできれば quiz UI、できなければ study UI にフォールバック
-  const quizBlanks = state.studyStyle === 'quiz' ? parseQuizBlanks(q.question, q.answer) : null;
-  if (quizBlanks && quizBlanks.length > 0) {
-    state.quiz = { blanks: quizBlanks, idx: 0, results: [], startTime: Date.now(), finished: false };
+  // この問題で今学習すべき穴(new/due)。mastered/waitは出題しない。
+  const active = qActiveBlanks(q);
+  const hadNew = active.some(s => s.st === 'new');
+  state.quiz = {
+    q, active, idx: 0, results: [], hadNew,
+    finished: false, phase: 'input', blankStart: 0,
+    masteredNow: [],
+  };
+
+  if (active.length > 0) {
+    // 解答モード: 穴ごとに入力・判定
     renderQuizBlank();
   } else {
-    // 学習モード(または穴が無く判定不可)
-    document.getElementById('btn-show-answer').hidden = false;
+    // 出題対象の穴が無い(全穴習得済み等)。念のため答えを表示して次へ。
+    const ansEl = document.getElementById('study-answer');
+    ansEl.hidden = false;
+    ansEl.innerHTML = `<div class="quiz-summary all-ok">この問題は学習対象の穴がありません</div>` + renderAnswer(q.answer);
+    state.quiz.phase = 'finished';
+    const nextBtn = document.getElementById('btn-quiz-next');
+    nextBtn.hidden = false;
+    nextBtn.textContent = (state.studyIdx >= state.studyDeck.length - 1) ? '完了' : '次の問題へ';
   }
 
   // TTS auto
@@ -773,12 +929,15 @@ function renderStudy() {
 
 // 解答モード: 現在の穴の入力欄を表示
 function renderQuizBlank() {
-  const { blanks, idx } = state.quiz;
-  const b = blanks[idx];
+  const { active, idx } = state.quiz;
+  const b = active[idx];
+  state.quiz.phase = 'input';
+  state.quiz.blankStart = Date.now();
   document.getElementById('quiz-area').hidden = false;
   const labelEl = document.getElementById('quiz-blank-label');
-  labelEl.innerHTML = blanks.length > 1
-    ? `<span class="qbl-num">${escapeHtml(b.label)}</span> の解答 <span class="qbl-count">(${idx + 1}/${blanks.length})</span>`
+  const totalBlanks = getBlanks(state.quiz.q).length;
+  labelEl.innerHTML = (totalBlanks > 1)
+    ? `<span class="qbl-num">${escapeHtml(b.label)}</span> の解答 <span class="qbl-count">(${idx + 1}/${active.length})</span>`
     : `解答を入力`;
   const input = document.getElementById('quiz-input');
   input.value = '';
@@ -792,14 +951,24 @@ function renderQuizBlank() {
   setTimeout(() => { try { input.focus(); } catch (e) {} }, 50);
 }
 
-// 解答モード: 現在の穴を判定
+// 1穴の自動SM-2評価: 不正解→1 / 速い正解→4 / 普通→3 / 遅い正解→2
+function rateBlankAuto(correct, elapsedSec) {
+  if (!correct) return 1;
+  if (elapsedSec <= BLANK_FAST_SEC) return 4;
+  if (elapsedSec <= BLANK_SLOW_SEC) return 3;
+  return 2;
+}
+
+// 解答モード: 現在の穴を判定(SM-2適用は次へ進む時=commitBlankでOverride反映後)
 function judgeQuizBlank() {
-  const { blanks, idx } = state.quiz;
-  const b = blanks[idx];
+  if (state.quiz.phase !== 'input') return;
+  const { active, idx, blankStart } = state.quiz;
+  const b = active[idx];
   const input = document.getElementById('quiz-input');
-  const val = input.value;
-  const correct = judgeAnswer(val, b.answer);
-  state.quiz.results[idx] = correct;
+  const correct = judgeAnswer(input.value, b.answer);
+  const elapsedSec = Math.max(0.1, (Date.now() - blankStart) / 1000);
+  state.quiz.results[idx] = { correct, elapsedSec };
+  state.quiz.phase = 'judged';
 
   input.readOnly = true;
   input.classList.add(correct ? 'correct' : 'incorrect');
@@ -808,15 +977,14 @@ function judgeQuizBlank() {
   fb.hidden = false;
   fb.className = 'quiz-feedback ' + (correct ? 'fb-correct' : 'fb-incorrect');
   fb.innerHTML = correct
-    ? `<span class="fb-mark">✓</span> 正解`
+    ? `<span class="fb-mark">✓</span> 正解 <span class="fb-time">${elapsedSec.toFixed(1)}秒</span>`
     : `<span class="fb-mark">✗</span> 不正解　<span class="fb-correct-ans">正解: ${escapeHtml(b.answer)}</span>`
       + ` <button class="fb-override" id="fb-override">やっぱり正解だった</button>`;
 
-  // override(自己申告で正解に)
   if (!correct) {
     const ov = document.getElementById('fb-override');
     if (ov) ov.addEventListener('click', () => {
-      state.quiz.results[idx] = true;
+      state.quiz.results[idx] = { correct: true, elapsedSec };
       input.classList.remove('incorrect');
       input.classList.add('correct');
       fb.className = 'quiz-feedback fb-correct';
@@ -826,144 +994,87 @@ function judgeQuizBlank() {
 
   document.getElementById('btn-quiz-judge').hidden = true;
   document.getElementById('btn-quiz-next').hidden = false;
-  const isLast = idx >= blanks.length - 1;
+  const isLast = idx >= active.length - 1;
   document.getElementById('btn-quiz-next').textContent = isLast ? '結果を見る' : '次の穴へ';
 
   if (state.ttsEnabled) speakNow(b.answer);
 }
 
-// 解答モード: 次の穴 or 全完了で評価へ
-function nextQuizBlank() {
-  // 結果表示後の「次へ」: 自動評価を適用して次の問題へ
-  if (state.quiz.finished) {
-    state.quiz.finished = false;
-    rate(state.quiz.autoRating || 3);
+// 1穴の結果を確定(SM-2 + 習得判定 + 保存)
+async function commitBlank(idx) {
+  const r = state.quiz.results[idx];
+  if (!r || r.committed) return;
+  r.committed = true;
+  const b = state.quiz.active[idx];
+  const key = b.key;
+  let bp = state.progress[key] || newProgress(key);
+  const rating = rateBlankAuto(r.correct, r.elapsedSec);
+  bp = applySM2(bp, rating);
+  // 連続高速正解の更新と習得卒業
+  if (r.correct && r.elapsedSec <= BLANK_FAST_SEC) bp.fastStreak = (bp.fastStreak || 0) + 1;
+  else bp.fastStreak = 0;
+  if (bp.fastStreak >= MASTER_STREAK) {
+    if (!bp.mastered) state.quiz.masteredNow.push(b.label || (b.i + 1));
+    bp.mastered = true;
+  }
+  state.progress[key] = bp;
+  await dbPut(STORE_P, bp);
+}
+
+// 解答モード: 次の穴 or 全完了
+async function nextQuizBlank() {
+  if (state.quiz.phase === 'finished') {
+    goNextQuestion();
     return;
   }
-  const { blanks } = state.quiz;
-  if (state.quiz.idx < blanks.length - 1) {
+  await commitBlank(state.quiz.idx);
+  if (state.quiz.idx < state.quiz.active.length - 1) {
     state.quiz.idx += 1;
     renderQuizBlank();
   } else {
-    finishQuizQuestion();
+    await finishQuizQuestion();
   }
 }
 
-// 解答モード: 全穴判定後、結果サマリ+SM-2評価ボタン
-// 誤答数と解答時間からSM-2評価(1=もう一度/2=難しい/3=普通/4=簡単)を自動決定
-const QUIZ_FAST_SEC = 8;    // 1穴あたりこれ以下なら高速
-const QUIZ_SLOW_SEC = 25;   // 1穴あたりこれを超えると低速
-function autoRateQuiz(results, elapsedMs) {
-  const total = results.length || 1;
-  const wrong = results.filter(r => !r).length;
-  const errorRate = wrong / total;
-  const avgSec = (elapsedMs / 1000) / total;
-  if (errorRate >= 0.5) return 1;         // 半分以上誤り → もう一度
-  if (errorRate > 0) return 2;            // 一部誤り → 難しい
-  // 全問正解 → 速さで判定
-  if (avgSec <= QUIZ_FAST_SEC) return 4;  // 速い → 簡単
-  if (avgSec <= QUIZ_SLOW_SEC) return 3;  // 普通 → 普通
-  return 2;                               // 遅い(正解だが時間) → 難しい
-}
+// 解答モード: 全穴判定後のサマリ。問題単位の評価は廃止(穴ごとに確定済み)。
+async function finishQuizQuestion() {
+  const { active, results, q, hadNew, masteredNow } = state.quiz;
+  state.quiz.phase = 'finished';
+  const correctCount = results.filter(r => r && r.correct).length;
+  const allCorrect = correctCount === active.length;
 
-function finishQuizQuestion() {
-  const { blanks, results, startTime } = state.quiz;
-  const correctCount = results.filter(Boolean).length;
-  const allCorrect = correctCount === blanks.length;
-  const elapsedMs = Date.now() - (startTime || Date.now());
-  const elapsedSec = Math.max(1, Math.round(elapsedMs / 1000));
-
-  const autoRating = autoRateQuiz(results, elapsedMs);
-  state.quiz.autoRating = autoRating;
-  state.quiz.finished = true;
-
-  // 解答を全文表示
-  const ansEl = document.getElementById('study-answer');
-  ansEl.hidden = false;
-
-  // quiz入力部は隠す
-  document.getElementById('quiz-area').hidden = true;
-  document.getElementById('btn-quiz-judge').hidden = true;
-
-  // 間隔プレビュー
-  const q = state.studyDeck[state.studyIdx];
-  const p = JSON.parse(JSON.stringify(state.progress[q.id] || newProgress(q.id)));
-  const ints = previewIntervals(p);
-  document.getElementById('int-1').textContent = fmtDays(ints[0]);
-  document.getElementById('int-2').textContent = fmtDays(ints[1]);
-  document.getElementById('int-3').textContent = fmtDays(ints[2]);
-  document.getElementById('int-4').textContent = fmtDays(ints[3]);
-
-  const ratingNames = { 1: 'もう一度', 2: '難しい', 3: '普通', 4: '簡単' };
-  const nextInt = fmtDays(ints[autoRating - 1]);
-
-  // サマリ + 自動評価表示
-  const head = blanks.length > 1
-    ? `${blanks.length}問中 ${correctCount}問正解`
-    : (allCorrect ? '正解' : '不正解');
-  const summary =
-    `<div class="quiz-summary ${allCorrect ? 'all-ok' : 'some-ng'}">${head} ・ ${elapsedSec}秒</div>` +
-    `<div class="quiz-autorate">自動評価 <strong class="rate-name r${autoRating}">${ratingNames[autoRating]}</strong>` +
-    `<span class="ar-next">次回 ${nextInt}</span></div>`;
-  ansEl.innerHTML = summary + renderAnswer(q.answer);
-
-  // 「次へ」(自動評価を適用して進む)を表示
-  const nextBtn = document.getElementById('btn-quiz-next');
-  nextBtn.hidden = false;
-  nextBtn.textContent = '次へ';
-
-  // 手動変更ボタン(任意): rating-gridは隠しておき、リンクで開く
-  const grid = document.getElementById('rating-grid');
-  grid.hidden = true;
-  grid.querySelectorAll('.rate').forEach(r => r.classList.remove('suggested'));
-  grid.querySelector('.rate' + ({1:'-again',2:'-hard',3:'-good',4:'-easy'}[autoRating])).classList.add('suggested');
-  document.getElementById('btn-quiz-manual').hidden = false;
-}
-
-function showAnswer() {
-  document.getElementById('study-answer').hidden = false;
-  document.getElementById('btn-show-answer').hidden = true;
-
-  // Show preview intervals on rating buttons
-  const q = state.studyDeck[state.studyIdx];
-  const p = JSON.parse(JSON.stringify(state.progress[q.id] || newProgress(q.id)));
-  const ints = previewIntervals(p);
-  document.getElementById('int-1').textContent = fmtDays(ints[0]);
-  document.getElementById('int-2').textContent = fmtDays(ints[1]);
-  document.getElementById('int-3').textContent = fmtDays(ints[2]);
-  document.getElementById('int-4').textContent = fmtDays(ints[3]);
-  document.getElementById('rating-grid').hidden = false;
-
-  if (state.ttsEnabled) speakNow(q.answer);
-}
-
-async function rate(rating) {
-  const q = state.studyDeck[state.studyIdx];
-  let p = state.progress[q.id];
-  const wasNew = !p || !p.due;
-  if (!p) p = newProgress(q.id);
-  p = applySM2(p, rating);
-  state.progress[q.id] = p;
-  await dbPut(STORE_P, p);
-
-  // Counters
-  if (wasNew) await bumpTodayCounter('new');
+  // 日次カウンタは問題ごとに1回(穴数では数えない)
+  if (hadNew) await bumpTodayCounter('new');
   else await bumpTodayCounter('rev');
 
-  // Stats
+  // セッション統計(問題単位)
   state.studyStats.total += 1;
-  if (rating === 1) state.studyStats.again += 1;
-  else if (rating === 2) state.studyStats.hard += 1;
-  else if (rating === 3) state.studyStats.good += 1;
-  else if (rating === 4) state.studyStats.easy += 1;
+  if (allCorrect) state.studyStats.good += 1; else state.studyStats.again += 1;
 
-  // 「もう一度」の再出題: 一度でも学習済みのカードのみ同セッション内で再出題
-  // 新規カード(初見)に「もう一度」を押した場合は翌日に回す(再出題しない)
-  if (rating === 1 && !wasNew) {
-    const requeuePos = Math.min(state.studyDeck.length, state.studyIdx + 4);
-    state.studyDeck.splice(requeuePos, 0, q);
+  // 解答全文 + サマリ表示
+  const ansEl = document.getElementById('study-answer');
+  ansEl.hidden = false;
+  const head = active.length > 1 ? `${active.length}問中 ${correctCount}問正解` : (allCorrect ? '正解' : '不正解');
+  let summary = `<div class="quiz-summary ${allCorrect ? 'all-ok' : 'some-ng'}">${head}</div>`;
+  if (masteredNow && masteredNow.length) {
+    summary += `<div class="quiz-mastered">🎓 ${masteredNow.length}個の穴を習得（以後出題されません）</div>`;
   }
+  // 残りの穴状況
+  const ratio = masteryRatio(q);
+  summary += `<div class="quiz-autorate">この問題の習得 <strong>${ratio.mastered}/${ratio.total}</strong> 穴</div>`;
+  ansEl.innerHTML = summary + renderAnswer(q.answer);
 
+  document.getElementById('quiz-area').hidden = true;
+  document.getElementById('btn-quiz-judge').hidden = true;
+  document.getElementById('btn-quiz-manual').hidden = true;
+  document.getElementById('rating-grid').hidden = true;
+  const nextBtn = document.getElementById('btn-quiz-next');
+  nextBtn.hidden = false;
+  nextBtn.textContent = (state.studyIdx >= state.studyDeck.length - 1) ? '完了' : '次の問題へ';
+}
+
+// 次の問題へ進む(共通)
+function goNextQuestion() {
   state.studyIdx += 1;
   if (state.studyIdx >= state.studyDeck.length) {
     finishStudy();
@@ -1032,7 +1143,7 @@ function renderList() {
   let items = state.questions.slice();
   if (state.listCat !== 'all') items = items.filter(q => q.category === state.listCat);
   if (state.listStatus !== 'all') {
-    items = items.filter(q => cardStatus(q, state.progress[q.id]) === state.listStatus);
+    items = items.filter(q => cardStatus(q) === state.listStatus);
   }
   if (state.listSearch) {
     const s = state.listSearch.toLowerCase();
@@ -1045,20 +1156,17 @@ function renderList() {
   }
 
   // Sort
+  const earliestDueOf = (q) => {
+    const ds = getBlankStates(q).filter(s => s.prog && s.prog.due && !s.prog.mastered)
+      .map(s => new Date(s.prog.due).getTime());
+    return ds.length ? Math.min(...ds) : Infinity;
+  };
+  const totalLapsesOf = (q) => getBlankStates(q).reduce((s, x) => s + (x.prog ? x.prog.lapses : 0), 0);
   const sortFn = {
     created: (a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''),
     importance: (a, b) => (b.importance || 0) - (a.importance || 0),
-    due: (a, b) => {
-      const pa = state.progress[a.id]; const pb = state.progress[b.id];
-      const da = pa && pa.due ? new Date(pa.due).getTime() : Infinity;
-      const db = pb && pb.due ? new Date(pb.due).getTime() : Infinity;
-      return da - db;
-    },
-    lapses: (a, b) => {
-      const la = (state.progress[a.id] || {}).lapses || 0;
-      const lb = (state.progress[b.id] || {}).lapses || 0;
-      return lb - la;
-    },
+    due: (a, b) => earliestDueOf(a) - earliestDueOf(b),
+    lapses: (a, b) => totalLapsesOf(b) - totalLapsesOf(a),
   };
   items.sort(sortFn[state.listSort] || sortFn.created);
 
@@ -1068,11 +1176,15 @@ function renderList() {
     return;
   }
   ul.innerHTML = items.map(q => {
-    const p = state.progress[q.id];
-    const status = cardStatus(q, p);
+    const status = cardStatus(q);
     const statusLabel = {new:'未学習', learning:'学習中', review:'復習中', mastered:'習得', leech:'苦手'}[status];
     const stars = '★'.repeat(q.importance || 0);
-    const due = p && p.due ? fmtDue(new Date(p.due)) : '未学習';
+    const ratio = masteryRatio(q);
+    const earliest = earliestDueOf(q);
+    let due;
+    if (status === 'mastered') due = `習得 ${ratio.mastered}/${ratio.total}`;
+    else if (earliest === Infinity) due = `未学習 (習得${ratio.mastered}/${ratio.total})`;
+    else due = `${fmtDue(new Date(earliest))} (習得${ratio.mastered}/${ratio.total})`;
     const author = q.author ? `<span class="q-author">作:${escapeHtml(q.author)}</span>` : '';
     return `<li class="q-item" data-qid="${escapeHtml(q.id)}">
       <div class="q-item-head">
@@ -1131,10 +1243,8 @@ async function saveEditor() {
   const author = document.getElementById('ed-author').value.trim();
 
   let rec;
-  let didResetProgress = false;
   if (state.editingId) {
     rec = state.questions.find(x => x.id === state.editingId);
-    const oldHash = rec.contentHash || contentHash(rec);
     rec.category = state.editingCat;
     rec.question = qText;
     rec.answer = aText;
@@ -1144,14 +1254,10 @@ async function saveEditor() {
     rec.importance = state.editingImp;
     rec.author = author || rec.author || '';
     rec.modifiedAt = new Date().toISOString();
-    const newHash = contentHash(rec);
-    rec.contentHash = newHash;
-    // 内容(問題文/解答)が変わったら新規問題として扱う = 進捗をリセット
-    if (oldHash !== newHash && state.progress[rec.id]) {
-      await dbDel(STORE_P, rec.id);
-      delete state.progress[rec.id];
-      didResetProgress = true;
-    }
+    rec.contentHash = contentHash(rec);
+    // 進捗キーは解答内容に紐づくため、解答が変わった穴だけ自然に新規化される。
+    // この問題のどの穴にも該当しなくなった進捗(=解答が変わった/消えた穴)を掃除する。
+    await pruneOrphanBlankProgress(rec);
   } else {
     rec = {
       id: uid(),
@@ -1168,7 +1274,7 @@ async function saveEditor() {
     state.questions.push(rec);
   }
   await dbPut(STORE_Q, rec);
-  toast(!state.editingId ? '追加しました' : (didResetProgress ? '保存しました(内容変更のため学習履歴をリセット)' : '保存しました'));
+  toast(state.editingId ? '保存しました' : '追加しました');
   state.editingId = null;
   renderHome();
   renderList();
@@ -1372,22 +1478,13 @@ async function importQuestionsReplace(file) {
     }
     const incomingIds = new Set(incoming.map(q => q.id).filter(Boolean));
 
-    // 差分を計算: 追加/更新/削除/内容変更(=進捗リセット対象)
-    let added = 0, updatedMeta = 0, removed = 0;
-    const resetIds = [];   // 内容が変わった→新規扱い(進捗リセット)
+    // 差分(問題単位): 追加/更新/削除。穴ごと履歴は解答内容で自動追従するため
+    // 「リセット」ではなく、解答が変わった/消えた穴の進捗だけ後で掃除する。
+    let added = 0, updated = 0, removed = 0;
     for (const q of incoming) {
-      const h = contentHash(q);
-      q.contentHash = h;
-      if (q.id && existingHash[q.id] !== undefined) {
-        if (existingHash[q.id] !== h) {
-          // 問題文/解答が変わった → 新規問題として扱う
-          if (state.progress[q.id]) resetIds.push(q.id);
-        } else {
-          updatedMeta++;  // 内容同じ(メタのみ変更の可能性)
-        }
-      } else {
-        added++;
-      }
+      q.contentHash = contentHash(q);
+      if (q.id && existingHash[q.id] !== undefined) updated++;
+      else added++;
     }
     for (const id of Object.keys(existingHash)) {
       if (!incomingIds.has(id)) removed++;
@@ -1395,16 +1492,15 @@ async function importQuestionsReplace(file) {
 
     const ok = await confirm(
       `PCの問題でスマホを同期します。\n\n` +
-      `合計 ${count}問になります\n` +
-      `・新規追加: ${added}件\n` +
-      `・内容変更で新規扱い(履歴リセット): ${resetIds.length}件\n` +
+      `合計 ${incoming.length}問になります\n` +
+      `・新規/更新: ${added + updated}件\n` +
       `・削除: ${removed}件\n\n` +
-      `内容を変えていない問題の学習履歴は保持されます。\n` +
+      `解答の中身を変えていない穴の学習履歴は保持されます。\n` +
       `続けますか?`
     );
     if (!ok) return;
 
-    // 問題バンクを全置換(1トランザクションでclear + 全put + 進捗リセット)
+    // 問題バンクを全置換
     for (const q of incoming) {
       if (!q.id) q.id = uid();
       if (!q.category) q.category = 'common';
@@ -1412,12 +1508,14 @@ async function importQuestionsReplace(file) {
       if (!q.createdAt) q.createdAt = new Date().toISOString();
       if (!q.modifiedAt) q.modifiedAt = q.createdAt;
     }
-    await dbReplaceAll(STORE_Q, incoming, resetIds);
+    await dbReplaceAll(STORE_Q, incoming, []);
     state.questions = [...incoming];
-    for (const id of resetIds) delete state.progress[id];
 
-    const kept = Object.keys(state.progress).filter(qid => incomingIds.has(qid)).length;
-    toast(`✓ 同期完了: 全${incoming.length}問 / 履歴保持${kept}件 / リセット${resetIds.length}件`);
+    // 各問題で、現在の穴に該当しない古い進捗(解答変更/削除された穴)を掃除
+    await pruneAllOrphanProgress();
+
+    const kept = Object.keys(state.progress).length;
+    toast(`✓ 同期完了: 全${incoming.length}問 / 保持中の穴履歴${kept}件`);
     renderHome(); renderList(); renderStats();
   } catch (e) {
     console.error(e);
@@ -1629,20 +1727,12 @@ async function importCSV(file) {
 
     if (incoming.length === 0) throw new Error('有効な問題行がありません');
 
-    // 差分計算
-    let added = 0, metaOrSame = 0;
-    const resetIds = [];
+    // 差分(問題単位): 追加/更新/削除。穴ごと履歴は解答内容で自動追従。
+    let added = 0, updated = 0;
     const incomingIds = new Set(incoming.map(q => q.id));
     for (const q of incoming) {
-      if (!q._matched) { added++; }
-      else {
-        const oldHash = q._matched.contentHash || contentHash(q._matched);
-        if (oldHash !== q.contentHash) {
-          if (state.progress[q.id]) resetIds.push(q.id);
-        } else {
-          metaOrSame++;
-        }
-      }
+      if (!q._matched) added++;
+      else updated++;
     }
     let removed = 0;
     for (const q of state.questions) {
@@ -1652,22 +1742,21 @@ async function importCSV(file) {
     const ok = await confirm(
       `CSVの内容でアプリを同期します。\n\n` +
       `合計 ${incoming.length}問になります\n` +
-      `・新規追加: ${added}件\n` +
-      `・内容変更で新規扱い(履歴リセット): ${resetIds.length}件\n` +
+      `・新規/更新: ${added + updated}件\n` +
       `・削除: ${removed}件\n\n` +
-      `内容を変えていない問題の学習履歴は保持されます。\n` +
+      `解答の中身を変えていない穴の学習履歴は保持されます。\n` +
       `続けますか?`
     );
     if (!ok) return;
 
-    // 問題バンクを全置換(1トランザクションでclear + 全put + 進捗リセット)
+    // 問題バンクを全置換 → そのあと解答が変わった/消えた穴の進捗を掃除
     incoming.forEach(q => delete q._matched);
-    await dbReplaceAll(STORE_Q, incoming, resetIds);
+    await dbReplaceAll(STORE_Q, incoming, []);
     state.questions = [...incoming];
-    for (const id of resetIds) delete state.progress[id];
+    await pruneAllOrphanProgress();
 
-    const kept = Object.keys(state.progress).filter(qid => incomingIds.has(qid)).length;
-    toast(`✓ CSV同期完了: 全${incoming.length}問 / 履歴保持${kept}件 / リセット${resetIds.length}件`);
+    const kept = Object.keys(state.progress).length;
+    toast(`✓ CSV同期完了: 全${incoming.length}問 / 保持中の穴履歴${kept}件`);
     renderHome(); renderList(); renderStats();
   } catch (e) {
     console.error(e);
@@ -1756,13 +1845,6 @@ function bindEvents() {
       renderHome();
     });
   });
-  // Study style (学習/解答)
-  document.querySelectorAll('.opt[data-style]').forEach(o => {
-    o.addEventListener('click', () => {
-      state.studyStyle = o.dataset.style;
-      document.querySelectorAll('.opt[data-style]').forEach(x => x.classList.toggle('active', x === o));
-    });
-  });
   // Action buttons
   document.getElementById('btn-review').addEventListener('click', () => startStudy('review'));
   document.getElementById('btn-new').addEventListener('click', () => startStudy('new'));
@@ -1785,17 +1867,9 @@ function bindEvents() {
     document.getElementById(id).addEventListener('change', saveSettingsFromForm);
   });
 
-  // Study controls
-  document.getElementById('btn-show-answer').addEventListener('click', showAnswer);
+  // Study controls (解答モードのみ)
   document.getElementById('btn-quiz-judge').addEventListener('click', judgeQuizBlank);
   document.getElementById('btn-quiz-next').addEventListener('click', nextQuizBlank);
-  document.getElementById('btn-quiz-manual').addEventListener('click', () => {
-    // 手動評価に切替: 自動の「次へ」を消し、4段階ボタンを表示
-    document.getElementById('rating-grid').hidden = false;
-    document.getElementById('btn-quiz-next').hidden = true;
-    document.getElementById('btn-quiz-manual').hidden = true;
-    state.quiz.finished = false;  // 手動選択に委ねる
-  });
   document.getElementById('quiz-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -1803,9 +1877,6 @@ function bindEvents() {
       if (!document.getElementById('btn-quiz-judge').hidden) judgeQuizBlank();
       else if (!document.getElementById('btn-quiz-next').hidden) nextQuizBlank();
     }
-  });
-  document.querySelectorAll('.rate').forEach(r => {
-    r.addEventListener('click', () => rate(Number(r.dataset.rating)));
   });
   document.getElementById('btn-study-back').addEventListener('click', async () => {
     if (state.studyIdx > 0) {
