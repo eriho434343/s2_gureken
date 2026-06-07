@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '2.0.0';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '2.0.1';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -1490,12 +1490,15 @@ async function importQuestionsReplace(file) {
       if (!incomingIds.has(id)) removed++;
     }
 
+    const delLine2 = removed > 0
+      ? `・削除: ${removed}問 ⚠️ アプリから消えます(学習履歴も削除)\n`
+      : `・削除: 0問\n`;
     const ok = await confirm(
       `PCの問題でスマホを同期します。\n\n` +
-      `合計 ${incoming.length}問になります\n` +
-      `・新規/更新: ${added + updated}件\n` +
-      `・削除: ${removed}件\n\n` +
-      `解答の中身を変えていない穴の学習履歴は保持されます。\n` +
+      `同期後は合計 ${incoming.length}問になります\n` +
+      `・新規/更新: ${added + updated}問\n` +
+      delLine2 +
+      `\n解答の中身を変えていない穴の学習履歴は保持されます。\n` +
       `続けますか?`
     );
     if (!ok) return;
@@ -1739,12 +1742,16 @@ async function importCSV(file) {
       if (!incomingIds.has(q.id)) removed++;
     }
 
+    const delLine = removed > 0
+      ? `・削除: ${removed}問 ⚠️ この問題はアプリから消えます(学習履歴も削除)\n`
+      : `・削除: 0問\n`;
     const ok = await confirm(
       `CSVの内容でアプリを同期します。\n\n` +
-      `合計 ${incoming.length}問になります\n` +
-      `・新規/更新: ${added + updated}件\n` +
-      `・削除: ${removed}件\n\n` +
-      `解答の中身を変えていない穴の学習履歴は保持されます。\n` +
+      `同期後は合計 ${incoming.length}問になります\n` +
+      `・新規/更新: ${added + updated}問\n` +
+      delLine +
+      `\nCSVに無い問題は(学習済みでも)削除されます。\n` +
+      `解答の中身を変えていない穴の学習履歴は保持されます。\n\n` +
       `続けますか?`
     );
     if (!ok) return;
