@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '2.0.1';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '2.0.2';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -43,6 +43,7 @@ const state = {
   selectedCat: 'all',
   selectedSize: 10,
   quiz: { active: [], idx: 0, results: [] },  // 解答モードの進行状態
+  editingReturnView: null,  // 編集保存後の戻り先('view-study' or null→'view-list')
   listCat: 'all',
   listStatus: 'all',
   listSort: 'created',
@@ -130,8 +131,8 @@ async function metaGet(key) { const r = await dbGet(STORE_M, key); return r ? r.
 // ============================================
 // 習得(マスター)の条件: 連続で速く正解した回数がこの値に達したら、その穴は卒業(以後出題しない)
 const MASTER_STREAK = 3;
-const BLANK_FAST_SEC = 8;   // 1穴あたりこの秒数以内なら「速い」
-const BLANK_SLOW_SEC = 25;  // これを超えると「遅い」
+const BLANK_FAST_SEC = 30;  // 1穴あたりこの秒数以内なら「速い」(連続MASTER_STREAK回で習得卒業)
+const BLANK_SLOW_SEC = 60;  // これを超えると「遅い」
 
 // 文字列ハッシュ(djb2)
 function hashStr(s) {
@@ -1276,24 +1277,52 @@ async function saveEditor() {
   await dbPut(STORE_Q, rec);
   toast(state.editingId ? '保存しました' : '追加しました');
   state.editingId = null;
+  const returnView = state.editingReturnView || 'view-list';
+  state.editingReturnView = null;
   renderHome();
   renderList();
-  showView('view-list');
+  if (returnView === 'view-study') {
+    // 出題中に編集した場合: 問題内容が変わったので現在の問題を再描画して戻る
+    renderStudy();
+    showView('view-study');
+  } else {
+    showView('view-list');
+  }
 }
 
 async function deleteEditor() {
   if (!state.editingId) return;
   const ok = await confirm('この問題を削除します。\n進捗データも削除されます。よろしいですか?');
   if (!ok) return;
-  await dbDel(STORE_Q, state.editingId);
-  await dbDel(STORE_P, state.editingId);
-  state.questions = state.questions.filter(q => q.id !== state.editingId);
-  delete state.progress[state.editingId];
+  const deletedId = state.editingId;
+  const returnView = state.editingReturnView || 'view-list';
+  state.editingReturnView = null;
+  await dbDel(STORE_Q, deletedId);
+  const prefix = deletedId + '#';
+  for (const k of Object.keys(state.progress)) {
+    if (k === deletedId || k.startsWith(prefix)) {
+      await dbDel(STORE_P, k);
+      delete state.progress[k];
+    }
+  }
+  state.questions = state.questions.filter(q => q.id !== deletedId);
   state.editingId = null;
   toast('削除しました');
   renderHome();
   renderList();
-  showView('view-list');
+  if (returnView === 'view-study') {
+    // 出題中に削除した場合: デッキからも除いて次の問題へ
+    state.studyDeck = state.studyDeck.filter(q => q.id !== deletedId);
+    if (state.studyDeck.length === 0) {
+      finishStudy();
+    } else {
+      state.studyIdx = Math.min(state.studyIdx, state.studyDeck.length - 1);
+      renderStudy();
+      showView('view-study');
+    }
+  } else {
+    showView('view-list');
+  }
 }
 
 // ============================================
@@ -1884,6 +1913,12 @@ function bindEvents() {
       if (!document.getElementById('btn-quiz-judge').hidden) judgeQuizBlank();
       else if (!document.getElementById('btn-quiz-next').hidden) nextQuizBlank();
     }
+  });
+  document.getElementById('btn-study-edit').addEventListener('click', () => {
+    const q = state.studyDeck[state.studyIdx];
+    if (!q) return;
+    state.editingReturnView = 'view-study';
+    openEditor(q.id);
   });
   document.getElementById('btn-study-back').addEventListener('click', async () => {
     if (state.studyIdx > 0) {
