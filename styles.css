@@ -666,7 +666,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .study-question {
-  font-size: calc(20px * var(--font-q-mult));
+  font-size: calc(14px * var(--font-q-mult));
   line-height: 1.85;
   color: var(--text);
   font-weight: 400;
@@ -842,7 +842,8 @@ input:focus, textarea:focus, select:focus {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--again) 14%, transparent);
 }
 .quiz-feedback {
-  margin-top: 12px;
+  margin-bottom: 10px;
+  margin-top: 4px;
   font-size: 14px;
   line-height: 1.6;
   animation: answerFade 0.25s var(--ease-out);
