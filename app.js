@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '2.0.2';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '2.0.3';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -813,19 +813,19 @@ function buildDeck(mode) {
 
   let deck = [];
   if (mode === 'review') {
-    deck = dueList.slice(0, revCap);
+    deck = shuffle(dueList.slice(0, revCap));
   } else if (mode === 'new') {
-    deck = newList.slice(0, newCap);
+    deck = shuffle(newList.slice(0, newCap));
   } else if (mode === 'wrong') {
-    deck = wrongList; // no daily cap on revisiting wrongs
+    deck = shuffle(wrongList);
   } else if (mode === 'mixed') {
     // Interleave new + due according to mixRatio
     const [nr, rr] = state.settings.mixRatio.split(':').map(Number);
     const target = size > 0 ? size : (dueList.length + newList.length);
     const nN = Math.min(newList.length, newCap, Math.floor(target * nr / (nr + rr)));
     const rN = Math.min(dueList.length, revCap, target - nN);
-    const news = newList.slice(0, nN);
-    const revs = dueList.slice(0, rN);
+    const news = shuffle(newList.slice(0, nN));
+    const revs = shuffle(dueList.slice(0, rN));
     deck = interleave(revs, news);
   }
   if (size > 0 && deck.length > size) deck = deck.slice(0, size);
