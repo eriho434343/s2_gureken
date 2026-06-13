@@ -666,7 +666,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .study-question {
-  font-size: calc(14px * var(--font-q-mult));
+  font-size: calc(10px * var(--font-q-mult));
   line-height: 1.85;
   color: var(--text);
   font-weight: 400;
