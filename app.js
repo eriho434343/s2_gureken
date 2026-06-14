@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '2.0.7';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '2.0.9';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -270,12 +270,13 @@ function renderBlanks(text) {
   });
 }
 function renderAnswer(text) {
-  // 改行は維持。①②...を少し強調。
-  return escapeHtml(text).replace(/([①-⑳])/g, '<span class="ans-num">$1</span>');
+  // 改行は維持。①②...㊿ を少し強調。
+  return escapeHtml(text).replace(/([①-⑳㉑-㊿])/g, '<span class="ans-num">$1</span>');
 }
 
 // 丸数字 ⇔ 整数
-const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
+// 丸数字 ①〜㊿ (1〜50)
+const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳㉑㉒㉓㉔㉕㉖㉗㉘㉙㉚㉛㉜㉝㉞㉟㊱㊲㊳㊴㊵㊶㊷㊸㊹㊺㊻㊼㊽㊾㊿';
 function circledToNum(s) {
   const i = CIRCLED.indexOf((s || '').trim());
   return i >= 0 ? i + 1 : null;
@@ -283,6 +284,9 @@ function circledToNum(s) {
 function numToCircled(n) {
   return (n >= 1 && n <= CIRCLED.length) ? CIRCLED[n - 1] : String(n);
 }
+// 丸数字にマッチする正規表現（①-㊿）
+const RE_CIRCLED = /([①-⑳㉑-㊿])/;
+const RE_CIRCLED_SPLIT = /([①-⑳㉑-㊿])\s*[:：]?\s*([^①-⑳㉑-㊿]*)/g;
 
 // 解答モード用: 問題文の穴と解答を対応づけて [{label, answer}] を返す。穴が無ければnull。
 function parseQuizBlanks(question, answer) {
@@ -290,10 +294,10 @@ function parseQuizBlanks(question, answer) {
   const numBlanks = matches.length;
   if (numBlanks === 0) return null;
 
-  // 解答を ①②… マーカーで分割
+  // 解答を ①②… マーカーで分割（①〜㊿ 対応）
   const parts = {};
   let hasMarkers = false;
-  const re = /([①-⑳])\s*[:：]?\s*([^①-⑳]*)/g;
+  const re = new RegExp(RE_CIRCLED_SPLIT.source, 'g');
   let m;
   while ((m = re.exec(answer || '')) !== null) {
     const n = circledToNum(m[1]);
@@ -1214,23 +1218,28 @@ function openEditor(qid) {
   document.querySelectorAll('#ed-stars .star').forEach(s => {
     s.classList.toggle('on', Number(s.dataset.imp) <= state.editingImp);
   });
-  document.getElementById('ed-q').value = q ? q.question : '';
-  document.getElementById('ed-a').value = q ? q.answer : '';
+  // Q&A1列形式: 既存問題はbuildQACellで復元
+  document.getElementById('ed-qa').value = q ? buildQACell(q.question, q.answer) : '';
   document.getElementById('ed-tags').value = q ? (q.tags || []).join(', ') : '';
   document.getElementById('ed-source').value = q ? (q.source || '') : '';
   document.getElementById('ed-year').value = q && q.year ? String(q.year) : '';
-  // For new questions, prefill author from settings; for existing, use stored
   document.getElementById('ed-author').value = q ? (q.author || '') : (state.settings.authorName || '');
   showView('view-edit');
 }
 
 async function saveEditor() {
-  const qText = document.getElementById('ed-q').value.trim();
-  const aText = document.getElementById('ed-a').value.trim();
-  if (!qText || !aText) {
+  const qaRaw = document.getElementById('ed-qa').value.trim();
+  if (!qaRaw) {
     toast('問題と解答は必須です');
     return;
   }
+  const parsed = parseQACell(qaRaw);
+  if (!parsed || !parsed.question) {
+    toast('問題文を入力してください');
+    return;
+  }
+  const qText = parsed.question;
+  const aText = parsed.answer || qaRaw;  // 穴なし問題は全体を解答とする
   const tagsRaw = document.getElementById('ed-tags').value;
   const tags = tagsRaw.split(/[,、]/).map(s => s.trim()).filter(Boolean);
   const source = document.getElementById('ed-source').value.trim();
@@ -2078,21 +2087,50 @@ function bindEvents() {
   document.getElementById('btn-quiz-judge').addEventListener('click', judgeQuizBlank);
   document.getElementById('btn-quiz-next').addEventListener('click', nextQuizBlank);
 
-  // Enterキー処理:
-  //  - IME変換中(isComposing=true)は無視 → 変換確定のEnterで誤判定しない
-  //  - 判定前: Enter → 判定する
-  //  - 判定後(次へボタン表示中): Enter → 次の穴 or 次の問題へ
-  document.getElementById('quiz-input').addEventListener('keydown', (e) => {
+  // Enterキーハンドラ（フォーカス位置に依存せず一元管理）
+  // - IME変換中(isComposing / keyCode=229)は無視
+  // - テキスト入力欄以外にフォーカスがある場合もキャプチャ
+  // - 二重発火防止: 処理後150msブロック
+  let _enterBlocked = false;
+  function blockEnter(ms = 150) {
+    _enterBlocked = true;
+    setTimeout(() => { _enterBlocked = false; }, ms);
+  }
+
+  function handleStudyEnter(e) {
     if (e.key !== 'Enter') return;
-    // IME変換中は何もしない(変換候補を確定するEnterを拾わない)
-    if (e.isComposing || e.keyCode === 229) return;
+    if (e.isComposing || e.keyCode === 229) return;  // IME変換中は無視
+    if (_enterBlocked) return;
+
+    // モーダルが開いていたら何もしない
+    const modal = document.getElementById('modal');
+    if (modal && !modal.hidden) return;
+
+    // 出題画面でなければ何もしない
+    const viewStudy = document.getElementById('view-study');
+    if (!viewStudy || viewStudy.hidden) return;
+
+    // 編集フォームなど他のinput/textareaにフォーカスがある場合は何もしない
+    const tag = (document.activeElement || {}).tagName || '';
+    const activeId = (document.activeElement || {}).id || '';
+    if ((tag === 'INPUT' || tag === 'TEXTAREA') && activeId !== 'quiz-input') return;
+
     e.preventDefault();
-    if (!document.getElementById('btn-quiz-judge').hidden) {
+
+    // quiz-inputが表示中かつbtn-quiz-judgeが有効 → 判定
+    const judgeBtn = document.getElementById('btn-quiz-judge');
+    const nextBtn = document.getElementById('btn-quiz-next');
+    if (judgeBtn && !judgeBtn.hidden) {
+      blockEnter();
       judgeQuizBlank();
-    } else if (!document.getElementById('btn-quiz-next').hidden) {
+    } else if (nextBtn && !nextBtn.hidden) {
+      // 次の穴 or 結果を見る or 次の問題へ
+      blockEnter(200);  // 次問題ロード中は少し長めにブロック
       nextQuizBlank();
     }
-  });
+  }
+
+  document.addEventListener('keydown', handleStudyEnter, { capture: true });
 
   // 音声入力
   initMic();
