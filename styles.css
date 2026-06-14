@@ -1158,6 +1158,19 @@ input:focus, textarea:focus, select:focus {
   text-transform: none;
   box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 30%, transparent);
 }
+.field-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: -2px 0 8px;
+  line-height: 1.5;
+}
+.field-hint code {
+  font-family: monospace;
+  background: var(--bg-soft);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
 .field-label .opt {
   display: inline-block;
   color: var(--text-faint);
