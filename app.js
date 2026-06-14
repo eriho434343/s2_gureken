@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '2.0.6';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '2.0.7';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -2077,11 +2077,20 @@ function bindEvents() {
   // Study controls (解答モードのみ)
   document.getElementById('btn-quiz-judge').addEventListener('click', judgeQuizBlank);
   document.getElementById('btn-quiz-next').addEventListener('click', nextQuizBlank);
+
+  // Enterキー処理:
+  //  - IME変換中(isComposing=true)は無視 → 変換確定のEnterで誤判定しない
+  //  - 判定前: Enter → 判定する
+  //  - 判定後(次へボタン表示中): Enter → 次の穴 or 次の問題へ
   document.getElementById('quiz-input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      if (!document.getElementById('btn-quiz-judge').hidden) judgeQuizBlank();
-      else if (!document.getElementById('btn-quiz-next').hidden) nextQuizBlank();
+    if (e.key !== 'Enter') return;
+    // IME変換中は何もしない(変換候補を確定するEnterを拾わない)
+    if (e.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    if (!document.getElementById('btn-quiz-judge').hidden) {
+      judgeQuizBlank();
+    } else if (!document.getElementById('btn-quiz-next').hidden) {
+      nextQuizBlank();
     }
   });
 
