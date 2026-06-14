@@ -792,32 +792,33 @@ input:focus, textarea:focus, select:focus {
 }
 .btn-mic {
   position: absolute;
-  right: 6px;
+  right: 5px;
   top: 50%;
   transform: translateY(-50%);
-  width: 36px;
-  height: 36px;
-  background: color-mix(in srgb, var(--primary) 18%, var(--bg-1));
-  border: 1.5px solid color-mix(in srgb, var(--primary) 40%, transparent);
-  border-radius: 50%;
-  color: var(--primary);
-  display: flex; align-items: center; justify-content: center;
-  transition: background 0.15s, color 0.15s, transform 0.15s, border-color 0.15s;
+  width: 44px;
+  height: calc(100% - 10px);
+  min-height: 32px;
+  background: var(--primary);
+  border: none;
+  border-radius: 8px;
+  color: #000;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  transition: background 0.15s, transform 0.12s, box-shadow 0.15s;
   flex-shrink: 0;
-  box-shadow: 0 0 8px color-mix(in srgb, var(--primary) 20%, transparent);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 50%, transparent);
 }
-.btn-mic:active { background: color-mix(in srgb, var(--primary) 30%, var(--bg-1)); transform: translateY(-50%) scale(0.93); }
-.btn-mic svg { width: 17px; height: 17px; }
+.btn-mic:active { background: var(--primary-2); transform: translateY(-50%) scale(0.93); }
+.btn-mic svg { width: 15px; height: 15px; flex-shrink: 0; }
+.btn-mic-label { font-size: 9px; font-weight: 700; letter-spacing: 0.02em; line-height: 1; }
 .btn-mic.recording {
-  background: color-mix(in srgb, var(--again) 22%, var(--bg-1));
-  border-color: var(--again);
-  color: var(--again);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--again) 40%, transparent);
+  background: var(--again);
+  color: #fff;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--again) 60%, transparent);
   animation: micPulse 0.7s ease-in-out infinite;
 }
 @keyframes micPulse {
-  0%, 100% { transform: translateY(-50%) scale(1); box-shadow: 0 0 8px color-mix(in srgb, var(--again) 40%, transparent); }
-  50% { transform: translateY(-50%) scale(1.12); box-shadow: 0 0 20px color-mix(in srgb, var(--again) 60%, transparent); }
+  0%, 100% { transform: translateY(-50%) scale(1);    box-shadow: 0 0 8px  color-mix(in srgb, var(--again) 40%, transparent); }
+  50%       { transform: translateY(-50%) scale(1.08); box-shadow: 0 0 20px color-mix(in srgb, var(--again) 70%, transparent); }
 }
 /* 音声API非対応時はボタンを非表示 */
 .btn-mic.hidden { display: none; }
@@ -863,7 +864,7 @@ input:focus, textarea:focus, select:focus {
 }
 .quiz-input {
   font-size: calc(15px * var(--font-q-mult));
-  padding: 12px 52px 12px 14px;
+  padding: 12px 56px 12px 14px;
   border: 2px solid var(--border-strong);
   border-radius: var(--r-md);
   background: var(--bg-1);
@@ -1469,3 +1470,45 @@ input:focus, textarea:focus, select:focus {
   display: flex; gap: 10px;
 }
 .modal-actions button { flex: 1; }
+
+/* ===== GAS連携UI ===== */
+.gas-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 12px 0 8px;
+}
+.gas-col {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.gas-col-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.03em;
+  margin-bottom: 2px;
+}
+.btn-gas-action {
+  width: 100%;
+  padding: 9px 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  text-align: center;
+  line-height: 1.3;
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn-gas-action:active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary);
+}
