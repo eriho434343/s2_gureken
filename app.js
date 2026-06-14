@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '2.0.3';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '2.0.4';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -934,6 +934,7 @@ function renderQuizBlank() {
   const b = active[idx];
   state.quiz.phase = 'input';
   state.quiz.blankStart = Date.now();
+  stopMic();
   document.getElementById('quiz-area').hidden = false;
   const labelEl = document.getElementById('quiz-blank-label');
   const totalBlanks = getBlanks(state.quiz.q).length;
@@ -1853,6 +1854,86 @@ async function resetAll() {
 }
 
 // ============================================
+// 音声入力 (Web Speech API / iOS Safari対応)
+// ============================================
+let _recog = null;
+let _micRecording = false;
+
+function initMic() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const btn = document.getElementById('btn-mic');
+  if (!SpeechRecognition) {
+    // 非対応ブラウザではボタン非表示のまま
+    return;
+  }
+  btn.classList.remove('hidden');
+
+  btn.addEventListener('click', () => {
+    if (_micRecording) {
+      stopMic();
+    } else {
+      startMic();
+    }
+  });
+}
+
+function startMic() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return;
+  const btn = document.getElementById('btn-mic');
+  const input = document.getElementById('quiz-input');
+
+  _recog = new SpeechRecognition();
+  _recog.lang = 'ja-JP';
+  _recog.continuous = false;
+  _recog.interimResults = false;
+  _recog.maxAlternatives = 1;
+
+  _recog.onstart = () => {
+    _micRecording = true;
+    btn.classList.add('recording');
+    input.value = '';
+    input.placeholder = '🎤 話してください...';
+  };
+
+  _recog.onresult = (e) => {
+    const transcript = e.results[0][0].transcript;
+    input.value = transcript;
+  };
+
+  _recog.onend = () => {
+    _micRecording = false;
+    btn.classList.remove('recording');
+    input.placeholder = '解答を入力';
+    // 認識結果があれば自動で判定
+    if (input.value.trim() && !document.getElementById('btn-quiz-judge').hidden) {
+      setTimeout(() => judgeQuizBlank(), 200);
+    }
+  };
+
+  _recog.onerror = (e) => {
+    _micRecording = false;
+    btn.classList.remove('recording');
+    input.placeholder = '解答を入力';
+    if (e.error !== 'no-speech' && e.error !== 'aborted') {
+      toast('音声入力エラー: ' + e.error);
+    }
+  };
+
+  try { _recog.start(); } catch (e) { console.warn('mic start error', e); }
+}
+
+function stopMic() {
+  if (_recog) {
+    try { _recog.stop(); } catch (e) {}
+    _recog = null;
+  }
+  _micRecording = false;
+  const btn = document.getElementById('btn-mic');
+  if (btn) btn.classList.remove('recording');
+}
+
+// ============================================
 // EVENTS
 // ============================================
 function bindEvents() {
@@ -1909,11 +1990,13 @@ function bindEvents() {
   document.getElementById('quiz-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      // 判定前ならEnterで判定、判定後ならEnterで次へ
       if (!document.getElementById('btn-quiz-judge').hidden) judgeQuizBlank();
       else if (!document.getElementById('btn-quiz-next').hidden) nextQuizBlank();
     }
   });
+
+  // 音声入力
+  initMic();
   document.getElementById('btn-study-edit').addEventListener('click', () => {
     const q = state.studyDeck[state.studyIdx];
     if (!q) return;
