@@ -724,6 +724,27 @@ input:focus, textarea:focus, select:focus {
 :root[data-fontsize="l"]  { --font-q-mult: 1.14; }
 :root[data-fontsize="xl"] { --font-q-mult: 1.30; }
 
+/* PC: 画面が広いので問題文・入力欄を読みやすいサイズに */
+@media (min-width: 768px) {
+  .study-question {
+    font-size: calc(15px * var(--font-q-mult));
+    line-height: 1.8;
+  }
+  .study-answer {
+    font-size: calc(14px * var(--font-q-mult));
+  }
+  .quiz-input {
+    font-size: calc(16px * var(--font-q-mult));
+    padding: 14px 60px 14px 16px;
+  }
+  .study-content {
+    padding: 18px 32px;
+    max-width: 720px;
+    margin: 0 auto;
+    width: 100%;
+  }
+}
+
 .study-actions {
   padding: 14px 18px calc(20px + var(--safe-bot));
   padding-left: max(18px, var(--safe-l));
@@ -1470,4 +1491,3 @@ input:focus, textarea:focus, select:focus {
   display: flex; gap: 10px;
 }
 .modal-actions button { flex: 1; }
-
