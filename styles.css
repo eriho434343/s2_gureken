@@ -57,7 +57,7 @@
   --safe-r:   env(safe-area-inset-right, 0px);
 
   --tabbar-h: 68px;
-  --topbar-h: 56px;
+  --topbar-h: 40px;
 
   --font-q-mult: 1;
 
@@ -255,14 +255,14 @@ input:focus, textarea:focus, select:focus {
   color: var(--text);
 }
 .icon-btn {
-  width: 44px; height: 44px;
+  width: 34px; height: 34px;
   background: transparent; border: none;
   color: var(--text-muted);
   border-radius: var(--r-md);
   display: flex; align-items: center; justify-content: center;
   transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out), transform 0.1s;
 }
-.icon-btn svg { width: 22px; height: 22px; }
+.icon-btn svg { width: 16px; height: 16px; }
 .icon-btn:active { background: var(--bg-soft); transform: scale(0.94); }
 .icon-btn:hover { color: var(--text); }
 .icon-btn-danger { color: var(--again); }
@@ -632,23 +632,23 @@ input:focus, textarea:focus, select:focus {
 
 .study-content {
   flex: 1;
-  padding: 28px 24px;
-  padding-left: max(24px, var(--safe-l));
-  padding-right: max(24px, var(--safe-r));
+  padding: 12px 20px;
+  padding-left: max(20px, var(--safe-l));
+  padding-right: max(20px, var(--safe-r));
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   display: flex; flex-direction: column;
 }
 .study-meta {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-faint);
   letter-spacing: 0.04em;
-  margin-bottom: 16px;
-  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  margin-bottom: 8px;
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
 }
 .study-meta .meta-cat {
   display: inline-block;
-  padding: 3px 10px;
+  padding: 2px 7px;
   background: var(--primary-soft);
   border-radius: 999px;
   color: var(--primary);
@@ -780,7 +780,43 @@ input:focus, textarea:focus, select:focus {
   font-feature-settings: "tnum" 1;
   font-weight: 500;
 }
-/* 正答状況に応じた推奨評価ボタンの強調 */
+/* 音声入力ラッパー: inputの右端にマイクボタンを重ねる */
+.quiz-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.quiz-input-wrap .quiz-input {
+  flex: 1;
+  width: 100%;
+}
+.btn-mic {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: var(--text-muted);
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.btn-mic:active { background: var(--bg-soft); }
+.btn-mic svg { width: 18px; height: 18px; }
+.btn-mic.recording {
+  color: var(--again);
+  animation: micPulse 0.8s ease-in-out infinite;
+}
+@keyframes micPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+/* 音声API非対応時はボタンを非表示 */
+.btn-mic.hidden { display: none; }
 .rate.suggested {
   outline: 2.5px solid var(--text);
   outline-offset: 2px;
@@ -793,16 +829,16 @@ input:focus, textarea:focus, select:focus {
 
 /* ===== Quiz mode (解答モード) ===== */
 .quiz-area {
-  margin-top: 28px;
-  padding-top: 22px;
+  margin-top: 14px;
+  padding-top: 12px;
   border-top: 1px dashed var(--border);
   animation: answerFade 0.3s var(--ease-out);
 }
 .quiz-blank-label {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-muted);
   font-weight: 600;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   letter-spacing: 0.02em;
 }
 .quiz-blank-label .qbl-num {
@@ -822,8 +858,8 @@ input:focus, textarea:focus, select:focus {
   font-variant-numeric: tabular-nums;
 }
 .quiz-input {
-  font-size: calc(17px * var(--font-q-mult));
-  padding: 15px 16px;
+  font-size: calc(15px * var(--font-q-mult));
+  padding: 12px 52px 12px 14px;
   border: 2px solid var(--border-strong);
   border-radius: var(--r-md);
   background: var(--bg-1);
