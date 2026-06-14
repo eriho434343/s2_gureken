@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '2.0.4';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '2.0.5';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -1856,16 +1856,15 @@ async function resetAll() {
 // ============================================
 // 音声入力 (Web Speech API / iOS Safari対応)
 // ============================================
+// 音声入力 (Web Speech API / iOS Safari対応)
+// ============================================
 let _recog = null;
 let _micRecording = false;
 
 function initMic() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   const btn = document.getElementById('btn-mic');
-  if (!SpeechRecognition) {
-    // 非対応ブラウザではボタン非表示のまま
-    return;
-  }
+  if (!SpeechRecognition) return;  // 非対応ブラウザではボタン非表示のまま
   btn.classList.remove('hidden');
 
   btn.addEventListener('click', () => {
@@ -1883,31 +1882,38 @@ function startMic() {
   const btn = document.getElementById('btn-mic');
   const input = document.getElementById('quiz-input');
 
+  // タップ直後に即座に視覚フィードバック(許可ダイアログ待ちの間も分かる)
+  btn.classList.add('recording');
+  input.value = '';
+  input.placeholder = '🎤 話してください...';
+
   _recog = new SpeechRecognition();
   _recog.lang = 'ja-JP';
   _recog.continuous = false;
-  _recog.interimResults = false;
+  _recog.interimResults = true;   // リアルタイムで中間結果を受け取る
   _recog.maxAlternatives = 1;
 
   _recog.onstart = () => {
     _micRecording = true;
-    btn.classList.add('recording');
-    input.value = '';
-    input.placeholder = '🎤 話してください...';
   };
 
   _recog.onresult = (e) => {
-    const transcript = e.results[0][0].transcript;
-    input.value = transcript;
+    // 中間結果も含めてリアルタイムで入力欄に表示
+    let interim = '', final = '';
+    for (const r of e.results) {
+      if (r.isFinal) final += r[0].transcript;
+      else interim += r[0].transcript;
+    }
+    input.value = final || interim;
   };
 
   _recog.onend = () => {
     _micRecording = false;
     btn.classList.remove('recording');
     input.placeholder = '解答を入力';
-    // 認識結果があれば自動で判定
+    // 認識結果があれば即座に判定(setTimeout不要)
     if (input.value.trim() && !document.getElementById('btn-quiz-judge').hidden) {
-      setTimeout(() => judgeQuizBlank(), 200);
+      judgeQuizBlank();
     }
   };
 
