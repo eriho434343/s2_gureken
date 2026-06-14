@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '2.0.5';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '2.0.6';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -34,8 +34,6 @@ const state = {
     fontSize: 'm',
     ttsAuto: false,
     authorName: '',
-    gasUrl: '',      // Apps Script Web App URL
-    userName: '',    // 個人進捗を区別するユーザー名
   },
   todayKey: '',
   todaySeen: { new: 0, rev: 0 },  // counters reset daily
@@ -410,145 +408,6 @@ function masteryRatio(q) {
 }
 
 // ============================================
-// Google Apps Script 連携（fetch方式）
-// GitHub Pages / localhost から動作。file://不可。
-// ============================================
-
-// GASにGETリクエストを送る
-async function gasGet(params) {
-  const url = state.settings.gasUrl;
-  if (!url) throw new Error('GAS URLが設定されていません');
-  const qs = new URLSearchParams(params).toString();
-  const res = await fetch(`${url}?${qs}`, { redirect: 'follow' });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  if (data && data.error) throw new Error(data.error);
-  return data;
-}
-
-// GASにPOSTリクエストを送る
-async function gasPost(body) {
-  const url = state.settings.gasUrl;
-  if (!url) throw new Error('GAS URLが設定されていません');
-  const res = await fetch(url, {
-    method: 'POST',
-    redirect: 'follow',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  if (data && data.error) throw new Error(data.error);
-  return data;
-}
-
-// 接続テスト
-async function gasPing() {
-  return gasGet({ action: 'ping' });
-}
-
-// スプレッドシートから問題を取得してアプリに同期
-async function gasPullQuestions() {
-  const res = await gasGet({ action: 'getQuestions' });
-  const raw = res.questions || [];
-  if (raw.length === 0) { toast('スプレッドシートに問題がありません'); return; }
-
-  // qaフィールドをparseQACell経由でquestion/answerに変換
-  const incoming = raw.map(r => {
-    const parsed = parseQACell(r.qa || r['Q&A'] || r.question || '');
-    const base = parsed || { question: r.question || '', answer: r.answer || '' };
-    return {
-      id: String(r.id || uid()),
-      category: r.category || 'common',
-      question: base.question,
-      answer: base.answer,
-      tags: r.tags ? String(r.tags).split(/[;,]/).map(s=>s.trim()).filter(Boolean) : [],
-      source: r.source || '',
-      year: r.year ? Number(r.year) : null,
-      importance: r.importance ? Math.min(5, Math.max(1, Number(r.importance))) : 3,
-      author: r.author || '',
-      createdAt: new Date().toISOString(),
-      modifiedAt: new Date().toISOString(),
-    };
-  }).filter(q => q.question && q.answer);
-  incoming.forEach(q => { q.contentHash = contentHash(q); });
-
-  const ok = await confirm(
-    `スプレッドシートから問題を取得します。\n\n` +
-    `${incoming.length}問が取得されました。\n` +
-    `既存の問題は上書きされます(解答が同じ穴の学習履歴は保持)。\n\n続けますか?`
-  );
-  if (!ok) return;
-
-  await dbReplaceAll(STORE_Q, incoming, []);
-  state.questions = [...incoming];
-  await pruneAllOrphanProgress();
-  toast(`✓ ${incoming.length}問をスプレッドシートから取得しました`);
-  renderHome(); renderList(); renderStats();
-}
-
-// アプリの問題をスプレッドシートにアップロード（全置換）
-async function gasPushQuestions() {
-  if (state.questions.length === 0) { toast('アップロードする問題がありません'); return; }
-  const ok = await confirm(
-    `スプレッドシートの問題をアプリの内容で上書きします。\n\n` +
-    `${state.questions.length}問をアップロードします。\n続けますか?`
-  );
-  if (!ok) return;
-
-  // buildQACellでQ&A形式に変換してアップロード
-  const rows = state.questions.map(q => ({
-    id: q.id,
-    category: q.category || 'common',
-    qa: buildQACell(q.question, q.answer),
-    tags: (q.tags || []).join(';'),
-    source: q.source || '',
-    year: q.year || '',
-    importance: q.importance || 3,
-    author: q.author || '',
-  }));
-  await gasPost({ action: 'syncQuestions', questions: rows });
-  toast(`✓ ${rows.length}問をスプレッドシートにアップロードしました`);
-}
-
-// スプレッドシートから個人進捗を取得
-async function gasPullProgress() {
-  const user = state.settings.userName;
-  if (!user) { toast('設定でユーザー名を入力してください'); return; }
-  const res = await gasGet({ action: 'getProgress', user });
-  const arr = res.progress || [];
-  if (arr.length === 0) { toast(`${user} の進捗データがありません`); return; }
-  const ok = await confirm(
-    `スプレッドシートから ${user} の学習進捗を取得します。\n` +
-    `端末内の進捗は上書きされます。\n続けますか?`
-  );
-  if (!ok) return;
-  // 進捗を上書き
-  await new Promise((resolve, reject) => {
-    const t = db.transaction(STORE_P, 'readwrite');
-    t.onerror = () => reject(t.error);
-    t.oncomplete = resolve;
-    const s = t.objectStore(STORE_P);
-    s.clear();
-    for (const p of arr) s.put(p);
-  });
-  state.progress = {};
-  for (const p of arr) state.progress[p.questionId] = p;
-  toast(`✓ ${arr.length}件の学習進捗を取得しました`);
-  renderHome(); renderList(); renderStats();
-}
-
-// 個人進捗をスプレッドシートに保存
-async function gasPushProgress() {
-  const user = state.settings.userName;
-  if (!user) { toast('設定でユーザー名を入力してください'); return; }
-  const arr = Object.values(state.progress);
-  if (arr.length === 0) { toast('保存する進捗データがありません'); return; }
-  await gasPost({ action: 'saveProgress', user, progress: arr });
-  toast(`✓ ${arr.length}件の学習進捗を保存しました`);
-}
-
-// ============================================
 // Loading & init
 // ============================================
 async function init() {
@@ -719,7 +578,7 @@ function applyFontSize() {
 
 async function loadSeed(merge = true) {
   // seed.jsonはfetch不要（file://でCORSエラーになるため）
-  // 問題はGASスプレッドシートまたはCSVインポートで追加する
+  // 問題はCSVインポートまたはアプリ内の編集で追加する
   const questions = [];  // 初期問題なし
   let added = 0;
   for (const q of questions) {
@@ -1568,8 +1427,6 @@ function renderSettings() {
   document.getElementById('set-font-size').value = state.settings.fontSize;
   document.getElementById('set-tts-auto').checked = !!state.settings.ttsAuto;
   document.getElementById('set-author-name').value = state.settings.authorName || '';
-  document.getElementById('set-gas-url').value = state.settings.gasUrl || '';
-  document.getElementById('set-user-name').value = state.settings.userName || '';
 }
 
 async function saveSettingsFromForm() {
@@ -1581,11 +1438,6 @@ async function saveSettingsFromForm() {
   state.settings.fontSize = document.getElementById('set-font-size').value;
   state.settings.ttsAuto = document.getElementById('set-tts-auto').checked;
   state.settings.authorName = document.getElementById('set-author-name').value.trim();
-  state.settings.gasUrl = document.getElementById('set-gas-url').value.trim();
-  state.settings.userName = document.getElementById('set-user-name').value.trim();
-  // authorNameとuserNameを連動(どちらか入っていればもう一方に補完)
-  if (!state.settings.authorName && state.settings.userName) state.settings.authorName = state.settings.userName;
-  if (!state.settings.userName && state.settings.authorName) state.settings.userName = state.settings.authorName;
   await saveSettings();
   applyTheme();
   applyFontSize();
@@ -2218,30 +2070,8 @@ function bindEvents() {
 
   // Settings: live save fields
   ['set-exam-date','set-new-per-day','set-rev-per-day','set-mix-ratio',
-   'set-theme','set-font-size','set-tts-auto','set-author-name',
-   'set-gas-url','set-user-name'].forEach(id => {
+   'set-theme','set-font-size','set-tts-auto','set-author-name'].forEach(id => {
     document.getElementById(id).addEventListener('change', saveSettingsFromForm);
-  });
-
-  // GAS連携ボタン
-  document.getElementById('btn-gas-ping').addEventListener('click', async () => {
-    try {
-      toast('接続確認中...');
-      const r = await gasPing();
-      toast(`✓ 接続OK (${new Date(r.time).toLocaleTimeString('ja-JP')})`);
-    } catch (e) { toast('接続失敗: ' + e.message); }
-  });
-  document.getElementById('btn-gas-pull-q').addEventListener('click', async () => {
-    try { await gasPullQuestions(); } catch(e) { toast('エラー: ' + e.message); }
-  });
-  document.getElementById('btn-gas-push-q').addEventListener('click', async () => {
-    try { await gasPushQuestions(); } catch(e) { toast('エラー: ' + e.message); }
-  });
-  document.getElementById('btn-gas-pull-p').addEventListener('click', async () => {
-    try { await gasPullProgress(); } catch(e) { toast('エラー: ' + e.message); }
-  });
-  document.getElementById('btn-gas-push-p').addEventListener('click', async () => {
-    try { await gasPushProgress(); } catch(e) { toast('エラー: ' + e.message); }
   });
 
   // Study controls (解答モードのみ)

@@ -410,35 +410,9 @@
       <div class="settings-section">
         <h3>あなた</h3>
         <label class="field">
-          <span class="field-label">ユーザー名 <span class="opt">必須(学習履歴の個別管理に使用)</span></span>
-          <input type="text" id="set-user-name" placeholder="例: 田中" autocomplete="off">
-        </label>
-        <label class="field">
           <span class="field-label">作成者名 <span class="opt">任意(問題作成時に記録)</span></span>
           <input type="text" id="set-author-name" placeholder="例: 田中" autocomplete="off">
         </label>
-      </div>
-
-      <div class="settings-section">
-        <h3>Googleスプレッドシート連携</h3>
-        <label class="field">
-          <span class="field-label">GAS Web App URL</span>
-          <input type="url" id="set-gas-url" placeholder="https://script.google.com/macros/s/..." autocomplete="off" style="font-size:11px">
-        </label>
-        <button class="btn-tertiary" id="btn-gas-ping">🔌 接続テスト</button>
-        <div class="gas-grid">
-          <div class="gas-col">
-            <div class="gas-col-label">📚 問題 (全員共有)</div>
-            <button class="btn-gas-action" id="btn-gas-pull-q">⬇ スプレッドシート → アプリ</button>
-            <button class="btn-gas-action" id="btn-gas-push-q">⬆ アプリ → スプレッドシート</button>
-          </div>
-          <div class="gas-col">
-            <div class="gas-col-label">🧠 学習履歴 (個人)</div>
-            <button class="btn-gas-action" id="btn-gas-pull-p">⬇ スプレッドシート → 端末</button>
-            <button class="btn-gas-action" id="btn-gas-push-p">⬆ 端末 → スプレッドシート</button>
-          </div>
-        </div>
-        <p class="hint">問題は全員で共有。学習履歴はユーザー名ごとに別シートで管理されます。<br>学習後は「端末 → スプレッドシート」で履歴を保存してください。</p>
       </div>
 
       <div class="settings-section">
@@ -519,7 +493,7 @@
       <div class="settings-section about">
         <h3>このアプリ</h3>
         <p>SM-2間隔反復・アクティブリコール・インターリービング・穴埋め式を採用。完全オフライン動作・無料。</p>
-        <p class="hint">v3.0.0 / Build 2026.06 (Googleスプレッドシート連携)</p>
+        <p class="hint">v2.0.6 / Build 2026.06 (GAS連携削除)</p>
       </div>
     </div>
   </section>
