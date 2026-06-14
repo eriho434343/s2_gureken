@@ -131,7 +131,17 @@
       <div class="quiz-area" id="quiz-area" hidden>
         <div class="quiz-blank-label" id="quiz-blank-label"></div>
         <div class="quiz-feedback" id="quiz-feedback" hidden></div>
-        <input type="text" id="quiz-input" class="quiz-input" placeholder="解答を入力" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">
+        <div class="quiz-input-wrap">
+          <input type="text" id="quiz-input" class="quiz-input" placeholder="解答を入力" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">
+          <button class="btn-mic hidden" id="btn-mic" aria-label="音声入力" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="2" width="6" height="12" rx="3"/>
+              <path d="M5 10a7 7 0 0 0 14 0"/>
+              <line x1="12" y1="19" x2="12" y2="22"/>
+              <line x1="8" y1="22" x2="16" y2="22"/>
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -456,7 +466,7 @@
       <div class="settings-section about">
         <h3>このアプリ</h3>
         <p>SM-2間隔反復・アクティブリコール・インターリービング・穴埋め式を採用。完全オフライン動作・無料。</p>
-        <p class="hint">v2.0.3 / Build 2026.06 (14pt・ランダム・正解上表示)</p>
+        <p class="hint">v2.0.4 / Build 2026.06 (10pt・音声入力・UI詰め)</p>
       </div>
     </div>
   </section>
@@ -477,6 +487,6 @@
   </div>
 </div>
 
-<script src="app.js?v=2.0.3"></script>
+<script src="app.js?v=2.0.4"></script>
 </body>
 </html>
