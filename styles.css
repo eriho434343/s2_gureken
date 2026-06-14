@@ -792,28 +792,32 @@ input:focus, textarea:focus, select:focus {
 }
 .btn-mic {
   position: absolute;
-  right: 8px;
+  right: 6px;
   top: 50%;
   transform: translateY(-50%);
-  width: 34px;
-  height: 34px;
-  background: transparent;
-  border: none;
+  width: 36px;
+  height: 36px;
+  background: color-mix(in srgb, var(--primary) 18%, var(--bg-1));
+  border: 1.5px solid color-mix(in srgb, var(--primary) 40%, transparent);
   border-radius: 50%;
-  color: var(--text-muted);
+  color: var(--primary);
   display: flex; align-items: center; justify-content: center;
-  transition: color 0.15s, background 0.15s;
+  transition: background 0.15s, color 0.15s, transform 0.15s, border-color 0.15s;
   flex-shrink: 0;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--primary) 20%, transparent);
 }
-.btn-mic:active { background: var(--bg-soft); }
-.btn-mic svg { width: 18px; height: 18px; }
+.btn-mic:active { background: color-mix(in srgb, var(--primary) 30%, var(--bg-1)); transform: translateY(-50%) scale(0.93); }
+.btn-mic svg { width: 17px; height: 17px; }
 .btn-mic.recording {
+  background: color-mix(in srgb, var(--again) 22%, var(--bg-1));
+  border-color: var(--again);
   color: var(--again);
-  animation: micPulse 0.8s ease-in-out infinite;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--again) 40%, transparent);
+  animation: micPulse 0.7s ease-in-out infinite;
 }
 @keyframes micPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%, 100% { transform: translateY(-50%) scale(1); box-shadow: 0 0 8px color-mix(in srgb, var(--again) 40%, transparent); }
+  50% { transform: translateY(-50%) scale(1.12); box-shadow: 0 0 20px color-mix(in srgb, var(--again) 60%, transparent); }
 }
 /* 音声API非対応時はボタンを非表示 */
 .btn-mic.hidden { display: none; }
