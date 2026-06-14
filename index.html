@@ -254,12 +254,9 @@
         </div>
       </label>
       <label class="field">
-        <span class="field-label">問題 <span class="req">必須</span> (穴埋めは【】または【①】【②】で囲む)</span>
-        <textarea id="ed-q" rows="4" placeholder="例: 【売上総利益】は売上高から売上原価を引いた利益" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
-      </label>
-      <label class="field">
-        <span class="field-label">解答 <span class="req">必須</span></span>
-        <textarea id="ed-a" rows="6" placeholder="例: 売上総利益 (穴が複数なら ① 〜　② 〜)" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+        <span class="field-label">問題 &amp; 解答 <span class="req">必須</span></span>
+        <p class="field-hint">CSVと同じ形式です。空欄にしたい語を <code>【】</code> で囲むと穴になり、囲んだ中身が解答になります。</p>
+        <textarea id="ed-qa" rows="6" placeholder="例: 【業績】や【コンプライアンス】を優先させてはならない意識の欠如があった" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
       </label>
       <label class="field">
         <span class="field-label">タグ <span class="opt">任意</span> (カンマ区切り)</span>
@@ -493,7 +490,7 @@
       <div class="settings-section about">
         <h3>このアプリ</h3>
         <p>SM-2間隔反復・アクティブリコール・インターリービング・穴埋め式を採用。完全オフライン動作・無料。</p>
-        <p class="hint">v2.0.6 / Build 2026.06 (GAS連携削除)</p>
+        <p class="hint">v2.0.9 / Build 2026.06 (エディタQ&A統合・丸数字50個対応)</p>
       </div>
     </div>
   </section>
