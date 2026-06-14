@@ -34,6 +34,8 @@ const state = {
     fontSize: 'm',
     ttsAuto: false,
     authorName: '',
+    gasUrl: '',      // Apps Script Web App URL
+    userName: '',    // 個人進捗を区別するユーザー名
   },
   todayKey: '',
   todaySeen: { new: 0, rev: 0 },  // counters reset daily
@@ -408,6 +410,145 @@ function masteryRatio(q) {
 }
 
 // ============================================
+// Google Apps Script 連携（fetch方式）
+// GitHub Pages / localhost から動作。file://不可。
+// ============================================
+
+// GASにGETリクエストを送る
+async function gasGet(params) {
+  const url = state.settings.gasUrl;
+  if (!url) throw new Error('GAS URLが設定されていません');
+  const qs = new URLSearchParams(params).toString();
+  const res = await fetch(`${url}?${qs}`, { redirect: 'follow' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if (data && data.error) throw new Error(data.error);
+  return data;
+}
+
+// GASにPOSTリクエストを送る
+async function gasPost(body) {
+  const url = state.settings.gasUrl;
+  if (!url) throw new Error('GAS URLが設定されていません');
+  const res = await fetch(url, {
+    method: 'POST',
+    redirect: 'follow',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if (data && data.error) throw new Error(data.error);
+  return data;
+}
+
+// 接続テスト
+async function gasPing() {
+  return gasGet({ action: 'ping' });
+}
+
+// スプレッドシートから問題を取得してアプリに同期
+async function gasPullQuestions() {
+  const res = await gasGet({ action: 'getQuestions' });
+  const raw = res.questions || [];
+  if (raw.length === 0) { toast('スプレッドシートに問題がありません'); return; }
+
+  // qaフィールドをparseQACell経由でquestion/answerに変換
+  const incoming = raw.map(r => {
+    const parsed = parseQACell(r.qa || r['Q&A'] || r.question || '');
+    const base = parsed || { question: r.question || '', answer: r.answer || '' };
+    return {
+      id: String(r.id || uid()),
+      category: r.category || 'common',
+      question: base.question,
+      answer: base.answer,
+      tags: r.tags ? String(r.tags).split(/[;,]/).map(s=>s.trim()).filter(Boolean) : [],
+      source: r.source || '',
+      year: r.year ? Number(r.year) : null,
+      importance: r.importance ? Math.min(5, Math.max(1, Number(r.importance))) : 3,
+      author: r.author || '',
+      createdAt: new Date().toISOString(),
+      modifiedAt: new Date().toISOString(),
+    };
+  }).filter(q => q.question && q.answer);
+  incoming.forEach(q => { q.contentHash = contentHash(q); });
+
+  const ok = await confirm(
+    `スプレッドシートから問題を取得します。\n\n` +
+    `${incoming.length}問が取得されました。\n` +
+    `既存の問題は上書きされます(解答が同じ穴の学習履歴は保持)。\n\n続けますか?`
+  );
+  if (!ok) return;
+
+  await dbReplaceAll(STORE_Q, incoming, []);
+  state.questions = [...incoming];
+  await pruneAllOrphanProgress();
+  toast(`✓ ${incoming.length}問をスプレッドシートから取得しました`);
+  renderHome(); renderList(); renderStats();
+}
+
+// アプリの問題をスプレッドシートにアップロード（全置換）
+async function gasPushQuestions() {
+  if (state.questions.length === 0) { toast('アップロードする問題がありません'); return; }
+  const ok = await confirm(
+    `スプレッドシートの問題をアプリの内容で上書きします。\n\n` +
+    `${state.questions.length}問をアップロードします。\n続けますか?`
+  );
+  if (!ok) return;
+
+  // buildQACellでQ&A形式に変換してアップロード
+  const rows = state.questions.map(q => ({
+    id: q.id,
+    category: q.category || 'common',
+    qa: buildQACell(q.question, q.answer),
+    tags: (q.tags || []).join(';'),
+    source: q.source || '',
+    year: q.year || '',
+    importance: q.importance || 3,
+    author: q.author || '',
+  }));
+  await gasPost({ action: 'syncQuestions', questions: rows });
+  toast(`✓ ${rows.length}問をスプレッドシートにアップロードしました`);
+}
+
+// スプレッドシートから個人進捗を取得
+async function gasPullProgress() {
+  const user = state.settings.userName;
+  if (!user) { toast('設定でユーザー名を入力してください'); return; }
+  const res = await gasGet({ action: 'getProgress', user });
+  const arr = res.progress || [];
+  if (arr.length === 0) { toast(`${user} の進捗データがありません`); return; }
+  const ok = await confirm(
+    `スプレッドシートから ${user} の学習進捗を取得します。\n` +
+    `端末内の進捗は上書きされます。\n続けますか?`
+  );
+  if (!ok) return;
+  // 進捗を上書き
+  await new Promise((resolve, reject) => {
+    const t = db.transaction(STORE_P, 'readwrite');
+    t.onerror = () => reject(t.error);
+    t.oncomplete = resolve;
+    const s = t.objectStore(STORE_P);
+    s.clear();
+    for (const p of arr) s.put(p);
+  });
+  state.progress = {};
+  for (const p of arr) state.progress[p.questionId] = p;
+  toast(`✓ ${arr.length}件の学習進捗を取得しました`);
+  renderHome(); renderList(); renderStats();
+}
+
+// 個人進捗をスプレッドシートに保存
+async function gasPushProgress() {
+  const user = state.settings.userName;
+  if (!user) { toast('設定でユーザー名を入力してください'); return; }
+  const arr = Object.values(state.progress);
+  if (arr.length === 0) { toast('保存する進捗データがありません'); return; }
+  await gasPost({ action: 'saveProgress', user, progress: arr });
+  toast(`✓ ${arr.length}件の学習進捗を保存しました`);
+}
+
+// ============================================
 // Loading & init
 // ============================================
 async function init() {
@@ -577,35 +718,29 @@ function applyFontSize() {
 }
 
 async function loadSeed(merge = true) {
-  try {
-    const r = await fetch('data/seed.json', { cache: 'no-store' });
-    if (!r.ok) throw new Error('seed fetch failed');
-    const data = await r.json();
-    let added = 0, skipped = 0;
-    for (const q of (data.questions || [])) {
-      if (merge && state.questions.find(x => x.id === q.id)) { skipped++; continue; }
-      const rec = {
-        id: q.id || uid(),
-        category: q.category || 'common',
-        tags: q.tags || [],
-        source: q.source || '',
-        year: q.year || null,
-        importance: q.importance || 3,
-        question: q.question || '',
-        answer: q.answer || '',
-        createdAt: q.createdAt || new Date().toISOString(),
-        modifiedAt: new Date().toISOString(),
-      };
-      rec.contentHash = contentHash(rec);
-      await dbPut(STORE_Q, rec);
-      const idx = state.questions.findIndex(x => x.id === rec.id);
-      if (idx >= 0) state.questions[idx] = rec; else state.questions.push(rec);
-      added++;
-    }
-    toast(`シード読込: 追加${added}件 / スキップ${skipped}件`);
-  } catch (e) {
-    console.warn('seed load failed', e);
-    toast('シード問題の読み込みに失敗しました');
+  // seed.jsonはfetch不要（file://でCORSエラーになるため）
+  // 問題はGASスプレッドシートまたはCSVインポートで追加する
+  const questions = [];  // 初期問題なし
+  let added = 0;
+  for (const q of questions) {
+    if (merge && state.questions.find(x => x.id === q.id)) continue;
+    const rec = {
+      id: q.id || uid(),
+      category: q.category || 'common',
+      tags: q.tags || [],
+      source: q.source || '',
+      year: q.year || null,
+      importance: q.importance || 3,
+      question: q.question || '',
+      answer: q.answer || '',
+      createdAt: q.createdAt || new Date().toISOString(),
+      modifiedAt: new Date().toISOString(),
+    };
+    rec.contentHash = contentHash(rec);
+    await dbPut(STORE_Q, rec);
+    const idx = state.questions.findIndex(x => x.id === rec.id);
+    if (idx >= 0) state.questions[idx] = rec; else state.questions.push(rec);
+    added++;
   }
 }
 
@@ -1433,6 +1568,8 @@ function renderSettings() {
   document.getElementById('set-font-size').value = state.settings.fontSize;
   document.getElementById('set-tts-auto').checked = !!state.settings.ttsAuto;
   document.getElementById('set-author-name').value = state.settings.authorName || '';
+  document.getElementById('set-gas-url').value = state.settings.gasUrl || '';
+  document.getElementById('set-user-name').value = state.settings.userName || '';
 }
 
 async function saveSettingsFromForm() {
@@ -1444,14 +1581,96 @@ async function saveSettingsFromForm() {
   state.settings.fontSize = document.getElementById('set-font-size').value;
   state.settings.ttsAuto = document.getElementById('set-tts-auto').checked;
   state.settings.authorName = document.getElementById('set-author-name').value.trim();
+  state.settings.gasUrl = document.getElementById('set-gas-url').value.trim();
+  state.settings.userName = document.getElementById('set-user-name').value.trim();
+  // authorNameとuserNameを連動(どちらか入っていればもう一方に補完)
+  if (!state.settings.authorName && state.settings.userName) state.settings.authorName = state.settings.userName;
+  if (!state.settings.userName && state.settings.authorName) state.settings.userName = state.settings.authorName;
   await saveSettings();
   applyTheme();
   applyFontSize();
+  toast('設定を保存しました');
 }
 
 // ============================================
 // IMPORT / EXPORT
 // ============================================
+// iCloud Drive同期: 固定ファイル名で保存（上書き = 同期）
+const ICLOUD_FILENAME = 'shoshin-study-sync.json';
+
+async function iCloudSave() {
+  const data = {
+    version: 2,
+    type: 'icloud-sync',
+    savedAt: new Date().toISOString(),
+    deviceHint: navigator.userAgent.includes('iPhone') ? 'iPhone'
+      : navigator.userAgent.includes('Mac') ? 'Mac' : 'unknown',
+    settings: state.settings,
+    questions: state.questions,
+    progress: Object.values(state.progress),
+  };
+  // iPhoneのSafariではdownloadリンクがファイルアプリに保存される
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = ICLOUD_FILENAME;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+  toast(`☁️ "${ICLOUD_FILENAME}" を保存しました\niPhoneは「ファイル」アプリ → iCloud Drive に保存してください`);
+}
+
+async function iCloudLoad(file) {
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (!data || !data.questions) throw new Error('ファイル形式が正しくありません');
+
+    const savedAt = data.savedAt ? new Date(data.savedAt).toLocaleString('ja-JP') : '不明';
+    const deviceHint = data.deviceHint || '不明';
+    const ok = await confirm(
+      `☁️ iCloudから読み込みます\n\n` +
+      `保存元: ${deviceHint}\n保存日時: ${savedAt}\n` +
+      `問題数: ${data.questions.length}問\n\n` +
+      `現在のデータ（問題・学習履歴）は上書きされます。\n続けますか?`
+    );
+    if (!ok) return;
+
+    // questions を置き換え
+    await dbReplaceAll(STORE_Q, data.questions, []);
+    state.questions = [...data.questions];
+
+    // progress を全置換（1トランザクション）
+    const progArr = Array.isArray(data.progress)
+      ? data.progress
+      : Object.values(data.progress || {});
+    await new Promise((resolve, reject) => {
+      const t = db.transaction(STORE_P, 'readwrite');
+      t.onerror = () => reject(t.error);
+      t.oncomplete = resolve;
+      const s = t.objectStore(STORE_P);
+      s.clear();
+      for (const p of progArr) s.put(p);
+    });
+    state.progress = {};
+    for (const p of progArr) state.progress[p.questionId] = p;
+
+    // settings があれば上書き
+    if (data.settings) {
+      state.settings = { ...state.settings, ...data.settings };
+      await saveSettings();
+    }
+
+    toast(`☁️ 読み込み完了: ${state.questions.length}問 / 進捗${progArr.length}件`);
+    applyTheme(); applyFontSize();
+    renderHome(); renderList(); renderStats(); renderSettings();
+  } catch (e) {
+    console.error(e);
+    toast('読み込み失敗: ' + e.message);
+  }
+}
+
 async function exportAll() {
   const data = {
     version: 2,
@@ -1882,7 +2101,7 @@ function startMic() {
   const btn = document.getElementById('btn-mic');
   const input = document.getElementById('quiz-input');
 
-  // タップ直後に即座に視覚フィードバック(許可ダイアログ待ちの間も分かる)
+  // タップ直後に即座に視覚フィードバック
   btn.classList.add('recording');
   input.value = '';
   input.placeholder = '🎤 話してください...';
@@ -1890,29 +2109,42 @@ function startMic() {
   _recog = new SpeechRecognition();
   _recog.lang = 'ja-JP';
   _recog.continuous = false;
-  _recog.interimResults = true;   // リアルタイムで中間結果を受け取る
+  _recog.interimResults = true;
   _recog.maxAlternatives = 1;
 
-  _recog.onstart = () => {
-    _micRecording = true;
-  };
+  let finalResult = '';
+  let judged = false;
+
+  _recog.onstart = () => { _micRecording = true; };
 
   _recog.onresult = (e) => {
-    // 中間結果も含めてリアルタイムで入力欄に表示
-    let interim = '', final = '';
+    let interim = '';
     for (const r of e.results) {
-      if (r.isFinal) final += r[0].transcript;
-      else interim += r[0].transcript;
+      if (r.isFinal) {
+        finalResult += r[0].transcript;
+      } else {
+        interim += r[0].transcript;
+      }
     }
-    input.value = final || interim;
+    input.value = finalResult || interim;
+
+    // 最終結果が出た瞬間に即判定(onendを待たない → iOS遅延を解消)
+    if (finalResult && !judged && !document.getElementById('btn-quiz-judge').hidden) {
+      judged = true;
+      btn.classList.remove('recording');
+      input.placeholder = '解答を入力';
+      _micRecording = false;
+      try { _recog.stop(); } catch (e) {}
+      judgeQuizBlank();
+    }
   };
 
   _recog.onend = () => {
     _micRecording = false;
     btn.classList.remove('recording');
     input.placeholder = '解答を入力';
-    // 認識結果があれば即座に判定(setTimeout不要)
-    if (input.value.trim() && !document.getElementById('btn-quiz-judge').hidden) {
+    // finalResultが来る前にonendが来た場合(no-speechなど)の補完
+    if (!judged && input.value.trim() && !document.getElementById('btn-quiz-judge').hidden) {
       judgeQuizBlank();
     }
   };
@@ -1986,8 +2218,30 @@ function bindEvents() {
 
   // Settings: live save fields
   ['set-exam-date','set-new-per-day','set-rev-per-day','set-mix-ratio',
-   'set-theme','set-font-size','set-tts-auto','set-author-name'].forEach(id => {
+   'set-theme','set-font-size','set-tts-auto','set-author-name',
+   'set-gas-url','set-user-name'].forEach(id => {
     document.getElementById(id).addEventListener('change', saveSettingsFromForm);
+  });
+
+  // GAS連携ボタン
+  document.getElementById('btn-gas-ping').addEventListener('click', async () => {
+    try {
+      toast('接続確認中...');
+      const r = await gasPing();
+      toast(`✓ 接続OK (${new Date(r.time).toLocaleTimeString('ja-JP')})`);
+    } catch (e) { toast('接続失敗: ' + e.message); }
+  });
+  document.getElementById('btn-gas-pull-q').addEventListener('click', async () => {
+    try { await gasPullQuestions(); } catch(e) { toast('エラー: ' + e.message); }
+  });
+  document.getElementById('btn-gas-push-q').addEventListener('click', async () => {
+    try { await gasPushQuestions(); } catch(e) { toast('エラー: ' + e.message); }
+  });
+  document.getElementById('btn-gas-pull-p').addEventListener('click', async () => {
+    try { await gasPullProgress(); } catch(e) { toast('エラー: ' + e.message); }
+  });
+  document.getElementById('btn-gas-push-p').addEventListener('click', async () => {
+    try { await gasPushProgress(); } catch(e) { toast('エラー: ' + e.message); }
   });
 
   // Study controls (解答モードのみ)
@@ -2068,6 +2322,18 @@ function bindEvents() {
   });
 
   // Settings: import/export
+  // iCloud Drive同期
+  document.getElementById('btn-icloud-save').addEventListener('click', iCloudSave);
+  document.getElementById('btn-icloud-load').addEventListener('click', () => {
+    const fi = document.createElement('input');
+    fi.type = 'file'; fi.accept = 'application/json,.json';
+    fi.addEventListener('change', async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      await iCloudLoad(f);
+    });
+    fi.click();
+  });
+
   document.getElementById('btn-export-all').addEventListener('click', exportAll);
 
   // CSV: question management (source of truth). Export (with id) and full-sync import.
