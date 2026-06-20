@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '2.0.9';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '2.0.10';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -171,6 +171,16 @@ function getBlankStates(q) {
 // 今学習すべき穴(new または due)
 function qActiveBlanks(q) {
   return getBlankStates(q).filter(s => s.st === 'new' || s.st === 'due');
+}
+// 「間違えた問題」モード用: new/dueに加え、まだ期日前でも
+// 直近で間違えた穴(lapses>=1かつ未習得)を出題対象に含める。
+// SM-2の間隔がまだ満了していなくても、ユーザーが明示的に選んだモードなので
+// 「学習対象の穴がありません」と出題できないのを避ける。
+function qWrongFocusBlanks(q) {
+  return getBlankStates(q).filter(s =>
+    s.st === 'new' || s.st === 'due' ||
+    (s.st === 'wait' && s.prog && !s.prog.mastered && s.prog.lapses >= 1 && s.prog.interval < 14)
+  );
 }
 
 function newProgress(key) {
@@ -898,7 +908,9 @@ function renderStudy() {
   document.getElementById('quiz-feedback').hidden = true;
 
   // この問題で今学習すべき穴(new/due)。mastered/waitは出題しない。
-  const active = qActiveBlanks(q);
+  // ただし「間違えた問題」モードでは、期日前でも直近の誤答穴を出題対象に含める。
+  const isWrongMode = state.studyStats && state.studyStats.mode === 'wrong';
+  const active = isWrongMode ? qWrongFocusBlanks(q) : qActiveBlanks(q);
   const hadNew = active.some(s => s.st === 'new');
   state.quiz = {
     q, active, idx: 0, results: [], hadNew,
