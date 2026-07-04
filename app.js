@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '2.0.10';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '2.1.0';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -587,7 +587,12 @@ function applyTheme() {
   document.documentElement.dataset.theme = t;
 }
 function applyFontSize() {
-  document.documentElement.dataset.fontsize = state.settings.fontSize || 'm';
+  const fs = state.settings.fontSize || 'm';
+  document.documentElement.dataset.fontsize = fs;
+  // 出題中フォントボタンのアクティブ状態を同期
+  document.querySelectorAll('.btn-font-size').forEach(b => {
+    b.classList.toggle('active', b.dataset.fs === fs);
+  });
 }
 
 async function loadSeed(merge = true) {
@@ -2146,6 +2151,18 @@ function bindEvents() {
 
   // 音声入力
   initMic();
+  // 出題中フォントサイズ切替ボタン
+  document.querySelectorAll('.btn-font-size').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      state.settings.fontSize = btn.dataset.fs;
+      applyFontSize();
+      await saveSettings();
+      // 設定画面のselect要素も同期
+      const sel = document.getElementById('set-font-size');
+      if (sel) sel.value = btn.dataset.fs;
+    });
+  });
+
   document.getElementById('btn-study-edit').addEventListener('click', () => {
     const q = state.studyDeck[state.studyIdx];
     if (!q) return;
