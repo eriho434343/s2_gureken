@@ -700,10 +700,10 @@ input:focus, textarea:focus, select:focus {
   background: var(--accent-soft);
   color: var(--accent);
   border-radius: 6px;
-  font-weight: 600;
+  font-weight: 700;
   font-style: normal;
   font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI", sans-serif;
-  font-size: 0.86em;
+  font-size: 1em;
   letter-spacing: 0.02em;
   border-bottom: 2px solid var(--accent);
   vertical-align: 0.05em;
@@ -729,10 +729,8 @@ input:focus, textarea:focus, select:focus {
   /* 出題画面全体を画面幅の2/3で中央寄せ */
   #view-study {
     max-width: 66.67vw;
-    margin: 0 auto;
-    left: 50%;
-    transform: translateX(-50%);
-    position: relative;
+    margin-left: auto;
+    margin-right: auto;
     box-shadow: 0 0 60px color-mix(in srgb, var(--primary) 6%, transparent);
   }
   .study-question {
