@@ -726,6 +726,15 @@ input:focus, textarea:focus, select:focus {
 
 /* PC: 画面が広いので問題文・入力欄を読みやすいサイズに */
 @media (min-width: 768px) {
+  /* 出題画面全体を画面幅の2/3で中央寄せ */
+  #view-study {
+    max-width: 66.67vw;
+    margin: 0 auto;
+    left: 50%;
+    transform: translateX(-50%);
+    position: relative;
+    box-shadow: 0 0 60px color-mix(in srgb, var(--primary) 6%, transparent);
+  }
   .study-question {
     font-size: calc(15px * var(--font-q-mult));
     line-height: 1.8;
@@ -739,9 +748,6 @@ input:focus, textarea:focus, select:focus {
   }
   .study-content {
     padding: 18px 32px;
-    max-width: 720px;
-    margin: 0 auto;
-    width: 100%;
   }
 }
 
@@ -843,6 +849,38 @@ input:focus, textarea:focus, select:focus {
 }
 /* 音声API非対応時はボタンを非表示 */
 .btn-mic.hidden { display: none; }
+
+/* ===== 出題中フォントサイズ切替ボタン ===== */
+.study-font-btns {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 2px;
+}
+.btn-font-size {
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  flex-shrink: 0;
+  padding: 0;
+  line-height: 1;
+}
+.btn-font-size:active { background: var(--bg-soft); }
+.btn-font-size.active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.btn-font-size[data-fs="s"]  { font-size: 10px; }
+.btn-font-size[data-fs="m"]  { font-size: 12px; }
+.btn-font-size[data-fs="l"]  { font-size: 14px; }
+.btn-font-size[data-fs="xl"] { font-size: 9px; letter-spacing: -0.5px; }
 .rate.suggested {
   outline: 2.5px solid var(--text);
   outline-offset: 2px;
