@@ -18,7 +18,7 @@ const STORE_P = 'progress';
 const STORE_S = 'sessions';
 const STORE_M = 'meta';
 
-const APP_VERSION = '2.1.0';  // バージョンが変わっても IndexedDB のデータは保持される
+const APP_VERSION = '2.1.3';  // バージョンが変わっても IndexedDB のデータは保持される
 
 const CATS = { common: '共通', solution: 'ソリューション', engineering: 'エンジニア' };
 
@@ -360,8 +360,8 @@ function parseQACell(qa) {
   if (!text) return null;
   const matches = [...text.matchAll(/【([^】]*)】/g)];
   if (matches.length === 0) {
-    // 穴が無い → 問題文のみ(解答空)。フィルイン用途では稀。
-    return { question: text, answer: '' };
+    // 穴が無い → 問題文のみ。解答として問題文全体をセット（スキップされないよう）
+    return { question: text, answer: text };
   }
   const blanks = [];
   if (matches.length === 1) {
@@ -1802,6 +1802,7 @@ async function importCSV(file) {
     const now = new Date().toISOString();
     const incoming = [];
     const usedIds = new Set();
+    const skippedRows = [];  // スキップされた行の記録
 
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i];
@@ -1810,15 +1811,28 @@ async function importCSV(file) {
       // Q&A形式 or question/answer形式 から {question, answer} を得る
       let qText, aText;
       if (useQA) {
-        const parsed = parseQACell(r[iQA] || '');
-        if (!parsed || !parsed.question) continue;
+        const cellRaw = r[iQA] || '';
+        const parsed = parseQACell(cellRaw);
+        if (!parsed || !parsed.question) {
+          if (cellRaw.trim()) {  // 空行でない場合のみ警告
+            console.warn(`[CSV] 行${i+1} スキップ: Q&Aパース失敗 "${cellRaw.slice(0,40)}"`);
+            skippedRows.push({ row: i+1, reason: 'Q&Aパース失敗', raw: cellRaw.slice(0, 60) });
+          }
+          continue;
+        }
         qText = parsed.question;
         aText = parsed.answer;
       } else {
         qText = (r[iQ] || '').trim();
         aText = (r[iA] || '').trim();
       }
-      if (!qText || !aText) continue;  // 必須欠落行はスキップ
+      if (!qText || !aText) {
+        if (qText || aText) {  // どちらかが入っている場合のみ警告
+          console.warn(`[CSV] 行${i+1} スキップ: qText="${qText.slice(0,30)}" aText="${aText.slice(0,30)}"`);
+          skippedRows.push({ row: i+1, reason: !qText ? '問題文が空' : '解答が空', raw: (qText || aText).slice(0, 60) });
+        }
+        continue;
+      }
 
       const cat = (iCat >= 0 ? (r[iCat] || '') : 'common').trim().toLowerCase();
       const catNorm = ['common','solution','engineering'].includes(cat) ? cat
@@ -1872,12 +1886,19 @@ async function importCSV(file) {
     const delLine = removed > 0
       ? `・削除: ${removed}問 ⚠️ この問題はアプリから消えます(学習履歴も削除)\n`
       : `・削除: 0問\n`;
+    const skipLine = skippedRows.length > 0
+      ? `・スキップ: ${skippedRows.length}行 ⚠️ 取り込めない行があります\n`
+      : '';
     const ok = await confirm(
       `CSVの内容でアプリを同期します。\n\n` +
       `同期後は合計 ${incoming.length}問になります\n` +
       `・新規/更新: ${added + updated}問\n` +
       delLine +
-      `\nCSVに無い問題は(学習済みでも)削除されます。\n` +
+      skipLine +
+      (skippedRows.length > 0
+        ? `\nスキップされた行:\n` + skippedRows.slice(0,5).map(s=>`  行${s.row}: ${s.reason} "${s.raw}"`).join('\n') + (skippedRows.length>5?`\n  ...他${skippedRows.length-5}行`:'') + '\n\n'
+        : '\n') +
+      `CSVに無い問題は(学習済みでも)削除されます。\n` +
       `解答の中身を変えていない穴の学習履歴は保持されます。\n\n` +
       `続けますか?`
     );
@@ -1890,7 +1911,8 @@ async function importCSV(file) {
     await pruneAllOrphanProgress();
 
     const kept = Object.keys(state.progress).length;
-    toast(`✓ CSV同期完了: 全${incoming.length}問 / 保持中の穴履歴${kept}件`);
+    const skipMsg = skippedRows.length > 0 ? ` / スキップ${skippedRows.length}行` : '';
+    toast(`✓ CSV同期完了: 全${incoming.length}問 / 保持中の穴履歴${kept}件${skipMsg}`);
     renderHome(); renderList(); renderStats();
   } catch (e) {
     console.error(e);
@@ -2207,8 +2229,14 @@ function bindEvents() {
 
   // Editor
   document.getElementById('btn-edit-back').addEventListener('click', () => {
+    const returnView = state.editingReturnView || 'view-list';
+    state.editingReturnView = null;
     state.editingId = null;
-    showView('view-list');
+    if (returnView === 'view-study') {
+      showView('view-study');
+    } else {
+      showView('view-list');
+    }
   });
   document.getElementById('btn-edit-save').addEventListener('click', saveEditor);
   document.getElementById('btn-edit-delete').addEventListener('click', deleteEditor);
